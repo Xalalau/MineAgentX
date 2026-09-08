@@ -39,9 +39,21 @@ public final class Ballistics {
     public static Vec3 calculateLead(Vec3 shooterPos, Vec3 targetPos,
                                       Vec3 targetVelocity, double projectileSpeed,
                                       double gravity) {
+        if (targetPos == null) return shooterPos;
+        if (shooterPos == null) return targetPos;
+        // A malformed provider/tool record must not turn an aiming update into
+        // NaN coordinates. In particular, division by a zero/negative speed
+        // previously produced Infinity and then poisoned yaw/pitch for every
+        // subsequent tick. Returning the current target is the safest
+        // recoverable fallback; the caller can still perform a direct shot.
+        if (!Double.isFinite(projectileSpeed) || projectileSpeed <= 0.0
+                || !Double.isFinite(gravity) || gravity < 0.0) {
+            return targetPos;
+        }
+        if (targetVelocity == null) targetVelocity = Vec3.ZERO;
         Vec3 delta = targetPos.subtract(shooterPos);
         double horizontalDist = Math.sqrt(delta.x * delta.x + delta.z * delta.z);
-        if (horizontalDist < 0.1) return targetPos;
+        if (!Double.isFinite(horizontalDist) || horizontalDist < 0.1) return targetPos;
 
         // Estimate flight time
         double flightTime = horizontalDist / projectileSpeed;
@@ -52,7 +64,7 @@ public final class Ballistics {
             Vec3 predicted = targetPos.add(targetVelocity.scale(flightTime));
             delta = predicted.subtract(shooterPos);
             horizontalDist = Math.sqrt(delta.x * delta.x + delta.z * delta.z);
-            if (horizontalDist < 0.1) return predicted;
+            if (!Double.isFinite(horizontalDist) || horizontalDist < 0.1) return predicted;
             flightTime = horizontalDist / projectileSpeed;
         }
 
@@ -71,12 +83,23 @@ public final class Ballistics {
      */
     public static double calculatePitch(double horizontalDist, double heightDiff,
                                          double velocity, double gravity) {
+        if (!Double.isFinite(horizontalDist) || horizontalDist < 0.0
+                || !Double.isFinite(heightDiff)
+                || !Double.isFinite(velocity) || velocity <= 0.0
+                || !Double.isFinite(gravity) || gravity < 0.0) {
+            return Double.NaN;
+        }
+        if (gravity == 0.0) {
+            // With no vertical acceleration the only meaningful solution is
+            // the direct line to the target; avoid a zero denominator below.
+            return -Math.atan2(heightDiff, horizontalDist);
+        }
         double vSq = velocity * velocity;
         double vSqSq = vSq * vSq;
         double discriminant = vSqSq - gravity * (gravity * horizontalDist * horizontalDist
                 + 2 * heightDiff * vSq);
 
-        if (discriminant < 0) return Double.NaN; // out of range
+        if (!Double.isFinite(discriminant) || discriminant < 0) return Double.NaN; // out of range
 
         // Use the lower arc (more direct shot)
         double pitch = Math.atan2(vSq - Math.sqrt(discriminant),

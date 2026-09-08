@@ -115,6 +115,10 @@ public class TransferItemsTool implements Tool {
         // produced minecraft:air for a full-stack move.
         String movedItemId = BuiltInRegistries.ITEM
                 .getKey(sourceStack.getItem()).toString();
+        int sourceBefore = sourceStack.getCount();
+        int destinationBefore = destinationStack.getCount();
+        String destinationItemBefore = destinationStack.isEmpty() ? "minecraft:air"
+                : BuiltInRegistries.ITEM.getKey(destinationStack.getItem()).toString();
 
         int requested = requestedCount == null
                 ? sourceStack.getCount() : Math.min(requestedCount, sourceStack.getCount());
@@ -192,6 +196,28 @@ public class TransferItemsTool implements Tool {
         result.addProperty("from_slot", fromIndex);
         result.addProperty("to_slot", toIndex);
         result.addProperty("count", moved);
+        ItemStack sourceAfterStack = source.getItem();
+        ItemStack destinationAfterStack = destination.getItem();
+        int sourceAfter = sourceAfterStack.getCount();
+        int destinationAfter = destinationAfterStack.getCount();
+        boolean verified;
+        if ("swap".equals(action)) {
+            String sourceAfterItem = sourceAfterStack.isEmpty() ? "minecraft:air"
+                    : BuiltInRegistries.ITEM.getKey(sourceAfterStack.getItem()).toString();
+            String destinationAfterItem = destinationAfterStack.isEmpty() ? "minecraft:air"
+                    : BuiltInRegistries.ITEM.getKey(destinationAfterStack.getItem()).toString();
+            verified = sourceAfter == destinationBefore
+                    && destinationAfter == sourceBefore
+                    && sourceAfterItem.equals(destinationItemBefore)
+                    && destinationAfterItem.equals(movedItemId);
+        } else {
+            verified = sourceAfter == sourceBefore - moved
+                    && destinationAfter == destinationBefore + moved
+                    && sourceBefore + destinationBefore == sourceAfter + destinationAfter;
+        }
+        result.addProperty("source_count_after", sourceAfter);
+        result.addProperty("destination_count_after", destinationAfter);
+        result.addProperty("postcondition_verified", verified);
         reply.accept(result.toString());
     }
 

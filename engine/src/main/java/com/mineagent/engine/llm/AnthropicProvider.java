@@ -3,6 +3,7 @@ package com.mineagent.engine.llm;
 import com.google.gson.*;
 import com.mineagent.api.llm.ChatMessage;
 import com.mineagent.api.llm.LLMResponse;
+import com.mineagent.api.llm.LLMCapabilities;
 import com.mineagent.api.llm.provider.LLMProvider;
 import com.mineagent.api.llm.provider.LLMProviderException;
 
@@ -27,6 +28,14 @@ public class AnthropicProvider implements LLMProvider {
 
     @Override
     public String providerId() { return "anthropic"; }
+
+    @Override
+    public LLMCapabilities capabilities() {
+        return new LLMCapabilities(java.util.EnumSet.of(
+                LLMCapabilities.Feature.CHAT_COMPLETIONS,
+                LLMCapabilities.Feature.FUNCTION_CALLING,
+                LLMCapabilities.Feature.PROMPT_CACHE_BREAKPOINT), 0, 0);
+    }
 
     @Override
     public String displayName() { return "Anthropic (Claude)"; }
@@ -75,6 +84,23 @@ public class AnthropicProvider implements LLMProvider {
                                  List<Map<String, Object>> tools,
                                  double temperature, int maxTokens,
                                  String reasoningEffort) {
+        return completeInternal(baseUrl, apiKey, model, messages, tools,
+                temperature, maxTokens, reasoningEffort, Duration.ofSeconds(120));
+    }
+
+    @Override
+    public LLMResponse complete(com.mineagent.api.llm.LLMRequest request) {
+        if (request == null) throw new IllegalArgumentException("Anthropic request is null");
+        return completeInternal(request.baseUrl(), request.apiKey(), request.model(),
+                request.messages(), request.tools(), request.temperature(),
+                request.maxTokens(), request.reasoningEffort(), request.deadline());
+    }
+
+    private LLMResponse completeInternal(String baseUrl, String apiKey, String model,
+                                          List<ChatMessage> messages,
+                                          List<Map<String, Object>> tools,
+                                          double temperature, int maxTokens,
+                                          String reasoningEffort, Duration timeout) {
         ProviderSupport.validateRequest(
                 "Anthropic", apiKey, model, messages, temperature, maxTokens);
         String resolvedBaseUrl = ProviderSupport.validatedBaseUrl(
@@ -300,14 +326,32 @@ public class AnthropicProvider implements LLMProvider {
 
             String url = ProviderSupport.endpoint(resolvedBaseUrl, "/v1/messages");
 
-            HttpRequest request = HttpRequest.newBuilder()
+            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
                     .uri(URI.create(url))
                     .header("Content-Type", "application/json")
-                    .header("x-api-key", apiKey)
                     .header("anthropic-version", "2023-06-01")
                     .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(body)))
-                    .timeout(Duration.ofSeconds(120))
-                    .build();
+                    .timeout(effectiveTimeout(timeout));
+            // Official Anthropic uses x-api-key. A number of Messages relays
+            // expose the same JSON protocol behind bearer auth; explicit
+            // prefixes make that choice unambiguous without guessing from the
+            // token shape or leaking it into logs.
+            String normalizedKey = apiKey == null ? "" : apiKey;
+            String lowerKey = normalizedKey.toLowerCase(java.util.Locale.ROOT);
+            if (lowerKey.startsWith("bearer:")) {
+                String token = normalizedKey.substring("bearer:".length());
+                if (token.isBlank()) throw new IllegalArgumentException(
+                        "Anthropic bearer token is empty");
+                requestBuilder.header("Authorization", "Bearer " + token);
+            } else if (lowerKey.startsWith("api-key:")) {
+                String token = normalizedKey.substring("api-key:".length());
+                if (token.isBlank()) throw new IllegalArgumentException(
+                        "Anthropic API key is empty");
+                requestBuilder.header("x-api-key", token);
+            } else {
+                requestBuilder.header("x-api-key", normalizedKey);
+            }
+            HttpRequest request = requestBuilder.build();
 
             HttpResponse<String> response = HTTP_CLIENT.send(request,
                     HttpResponse.BodyHandlers.ofString());
@@ -333,6 +377,14 @@ public class AnthropicProvider implements LLMProvider {
         } catch (RuntimeException e) {
             throw e;
         }
+    }
+
+    private static Duration effectiveTimeout(Duration timeout) {
+        if (timeout == null || timeout.isNegative() || timeout.isZero()) {
+            return Duration.ofSeconds(30);
+        }
+        return timeout.compareTo(Duration.ofMinutes(10)) > 0
+                ? Duration.ofMinutes(10) : timeout;
     }
 
     private String translateRole(String role) {

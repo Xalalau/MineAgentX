@@ -551,7 +551,18 @@ public final class PlanGraph {
         nodes.clear();
         taskBindings.clear();
         toolBindings.clear();
-        if (state == null) return;
+        if (state == null) {
+            // clearAll() deliberately uses the same import boundary as file
+            // restore. Returning here would leave the old goal and verified
+            // status alive in memory after its JSON checkpoint was deleted.
+            goal = "";
+            constraints = List.of();
+            goalConditions = List.of();
+            goalStatus = GoalStatus.UNPLANNED;
+            repairCount = 0;
+            revision++;
+            return;
+        }
         goal = normalize(state.goal(), "Restored goal");
         constraints = state.constraints() == null ? List.of() : List.copyOf(state.constraints());
         goalConditions = state.goalConditions() == null

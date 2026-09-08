@@ -58,6 +58,7 @@ public class MoveToTool implements Tool {
             reply.accept("{\"error\":\"Missing required parameter 'goal_mode'. Use xz/xzy/y/block.\"}");
             return;
         }
+        goalMode = goalMode.trim().toLowerCase(java.util.Locale.ROOT);
         Integer parsedX = ToolArgs.getIntOrNull(args, "x");
         Integer y = ToolArgs.getIntOrNull(args, "y");
         Integer z = ToolArgs.getIntOrNull(args, "z");

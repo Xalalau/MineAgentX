@@ -77,11 +77,13 @@ public final class CoordinateTeamTool implements Tool {
                             "'objective' is required and must be at most " + MAX_TEXT + " characters."));
                     return;
                 }
-                TeamBlackboard.commit(player.ownerUuid(), player.companionId(),
-                        objective, defaulted(bounded(args, "role"), "flex"),
+                TeamBlackboard.ClaimResult claim = TeamBlackboard.tryCommit(
+                        player.ownerUuid(), player.companionId(), objective,
+                        defaulted(bounded(args, "role"), "flex"),
                         bounded(args, "target"), gameTick);
-                result.addProperty("success", true);
-                result.addProperty("committed", objective);
+                result.addProperty("success", claim.accepted());
+                result.addProperty("committed", claim.accepted());
+                result.addProperty("reason", claim.reason());
             }
             case "request_support" -> {
                 String request = bounded(args, "request");

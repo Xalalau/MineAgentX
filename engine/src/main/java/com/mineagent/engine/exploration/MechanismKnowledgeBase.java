@@ -368,6 +368,10 @@ public final class MechanismKnowledgeBase {
                 rules.put(restored.id(), restored);
             }
             revision = Math.max(0L, state.revision()) + 1L;
+        } else {
+            // Keep reset semantics symmetric with persistence restore. A
+            // deleted checkpoint must not leave old mod rules active.
+            revision++;
         }
         trim();
     }

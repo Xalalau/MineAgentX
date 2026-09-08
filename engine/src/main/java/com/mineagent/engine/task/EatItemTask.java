@@ -27,6 +27,7 @@ public final class EatItemTask extends CompanionTask<EatItemTool.EatItemTaskReco
     private int maxUseTicks;
     private String failReason;
     private boolean startedUse;
+    private boolean consumedDuringInterrupt;
 
     public EatItemTask(AgentPlayer player, EatItemTool.EatItemTaskRecord record) {
         super(player, record);
@@ -35,6 +36,12 @@ public final class EatItemTask extends CompanionTask<EatItemTool.EatItemTaskReco
     @Override
     protected void onStart() {
         serverPlayer = TaskContext.serverPlayer(player);
+        failReason = null;
+        startedUse = false;
+        consumedDuringInterrupt = false;
+        elapsedUseTicks = 0;
+        consumedType = ItemStack.EMPTY;
+        foodId = null;
         Inventory inventory = serverPlayer.getInventory();
         int foodSlot = findFoodSlot(inventory);
         if (foodSlot < 0) {
@@ -77,6 +84,7 @@ public final class EatItemTask extends CompanionTask<EatItemTool.EatItemTaskReco
 
     @Override
     protected TaskState onTick() {
+        if (consumedDuringInterrupt) return TaskState.SUCCESS;
         if (failReason != null) return TaskState.FAILED;
         long now = serverPlayer.level().getGameTime();
         if (record.deadline() > 0L && now >= record.deadline()) {
@@ -139,6 +147,24 @@ public final class EatItemTask extends CompanionTask<EatItemTool.EatItemTaskReco
             serverPlayer.stopUsingItem();
         }
         TaskContext.inputDriver(player).clear();
+    }
+
+    @Override
+    protected void onResume() {
+        // Vanilla can finish consumption in ServerPlayer.tick() immediately
+        // before the scheduler publishes its next task tick. Restarting here
+        // would otherwise eat a second item after a survival preemption.
+        if (serverPlayer != null && !consumedType.isEmpty()) {
+            int matchingAfter = countMatching(serverPlayer.getInventory(), consumedType);
+            boolean consumed = matchingAfter < matchingCountBefore;
+            boolean fed = serverPlayer.getFoodData().getFoodLevel() > foodLevelBefore;
+            if (consumed || fed) {
+                consumedDuringInterrupt = true;
+                failReason = null;
+                return;
+            }
+        }
+        onStart();
     }
 
     @Override

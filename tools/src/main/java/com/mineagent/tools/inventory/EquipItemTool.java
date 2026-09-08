@@ -99,10 +99,20 @@ public class EquipItemTool implements Tool {
         if (targetSlot < 9) inventory.selected = targetSlot;
         TaskContext.syncInventory(sp);
 
+        var equipped = inventory.getItem(targetSlot);
+        boolean selected = targetSlot >= 9 || inventory.selected == targetSlot;
+        // This is a server-side read after the swap, not an assertion based on
+        // the requested arguments. AgentLoop uses it as the transaction's
+        // synchronous postcondition.
+        boolean verified = !equipped.isEmpty()
+                && BuiltInRegistries.ITEM.getKey(equipped.getItem()).equals(itemId)
+                && selected;
+
         JsonObject result = new JsonObject();
         result.addProperty("success", true);
         result.addProperty("item", itemId.toString());
         result.addProperty("slot", slotName);
+        result.addProperty("postcondition_verified", verified);
         reply.accept(result.toString());
     }
 

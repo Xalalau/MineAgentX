@@ -37,6 +37,8 @@ public class BuildTask extends CompanionTask<BuildTool.BuildTaskRecord>
     private String failReason;
     private String lastPlaceFailure;
     private boolean[] verifiedPositions;
+    private boolean recordValid;
+    private String recordValidationError;
 
     /** Placement should resolve promptly; breaking uses a hardness-aware limit. */
     private static final int MAX_PLACE_TICKS = 60;
@@ -48,8 +50,19 @@ public class BuildTask extends CompanionTask<BuildTool.BuildTaskRecord>
 
     @Override
     protected void onStart() {
+        recordValidationError = validateRecord();
+        recordValid = recordValidationError == null;
         phase = Phase.NAVIGATE;
-        verifiedPositions = new boolean[record.positions.length];
+        verifiedPositions = new boolean[recordValid ? record.positions.length : 0];
+        if (!recordValid) {
+            // Tool-created records are validated before dispatch, but task
+            // records are public API objects and may be constructed by an
+            // extension. Reject malformed coordinates/modes explicitly so a
+            // scheduler exception cannot be mistaken for a successful build.
+            failReason = recordValidationError;
+            phase = Phase.DONE;
+            return;
+        }
         refreshVerifiedPositions();
         actTicks = 0;
         actTimeoutTicks = MAX_PLACE_TICKS;
@@ -64,6 +77,14 @@ public class BuildTask extends CompanionTask<BuildTool.BuildTaskRecord>
 
     @Override
     protected void onResume() {
+        recordValidationError = validateRecord();
+        recordValid = recordValidationError == null;
+        if (!recordValid) {
+            failReason = recordValidationError;
+            phase = Phase.DONE;
+            verifiedPositions = new boolean[0];
+            return;
+        }
         // Re-evaluate every requested cell from the authoritative world. A
         // survival interruption may occur immediately after vanilla places or
         // breaks a block but before the next task tick observes it.
@@ -102,9 +123,10 @@ public class BuildTask extends CompanionTask<BuildTool.BuildTaskRecord>
 
     @Override
     protected TaskState onTick() {
+        if (!recordValid) return TaskState.FAILED;
         // Timeout check
         long gameTime = TaskContext.serverPlayer(player).level().getGameTime();
-        if (gameTime >= record.deadline()) {
+        if (record.deadline() > 0L && gameTime >= record.deadline()) {
             cancelNav();
             return TaskState.FAILED;
         }
@@ -188,9 +210,46 @@ public class BuildTask extends CompanionTask<BuildTool.BuildTaskRecord>
             }
 
             if (foundSlot == -1) {
-                failReason = "No '" + record.blockType + "' in inventory for position "
-                        + currentIndex + " (" + pos[0] + "," + pos[1] + "," + pos[2] + ")";
-                phase = Phase.DONE;
+                // Creative mode supplies blocks infinitely, but vanilla still
+                // requires a BlockItem in the hand for useItemOn to calculate
+                // placement state and invoke mod hooks. Use a temporary stack
+                // only for this verified click and restore the selected stack
+                // afterwards; survival/adventure retain the strict inventory
+                // requirement and therefore cannot duplicate items.
+                if (!sp.isCreative() || desiredItem == net.minecraft.world.item.Items.AIR) {
+                    failReason = "No '" + record.blockType + "' in inventory for position "
+                            + currentIndex + " (" + pos[0] + "," + pos[1] + "," + pos[2] + ")";
+                    phase = Phase.DONE;
+                    return;
+                }
+                var selectedSlot = Math.max(0, Math.min(8, inventory.selected));
+                var previous = inventory.getItem(selectedSlot);
+                inventory.setItem(selectedSlot, new net.minecraft.world.item.ItemStack(desiredItem));
+                inventory.setChanged();
+                sp.inventoryMenu.broadcastChanges();
+                try {
+                    Placement.Attempt attempt = Placement.placeHeldBlock(
+                            sp, target, InteractionHand.MAIN_HAND);
+                    lastPlaceFailure = attempt.reason();
+                    actTicks++;
+                    var newState = level.getBlockState(target);
+                    if (McCompat.isBlock(newState, record.blockType)) {
+                        TaskContext.syncInventory(sp);
+                        recordPlacedAsset(target, newState);
+                        advancePosition();
+                    } else if (actTicks > MAX_PLACE_TICKS) {
+                        failReason = "Failed to place block at (" + pos[0] + ","
+                                + pos[1] + "," + pos[2] + "): " + lastPlaceFailure;
+                        phase = Phase.DONE;
+                    }
+                } finally {
+                    inventory.setItem(selectedSlot, previous);
+                    inventory.setChanged();
+                    sp.inventoryMenu.broadcastChanges();
+                    if (sp.containerMenu != sp.inventoryMenu) {
+                        sp.containerMenu.broadcastChanges();
+                    }
+                }
                 return;
             }
 
@@ -348,6 +407,7 @@ public class BuildTask extends CompanionTask<BuildTool.BuildTaskRecord>
     }
 
     private void refreshVerifiedPositions() {
+        if (!recordValid) return;
         if (verifiedPositions == null
                 || verifiedPositions.length != record.positions.length) {
             verifiedPositions = new boolean[record.positions.length];
@@ -383,7 +443,14 @@ public class BuildTask extends CompanionTask<BuildTool.BuildTaskRecord>
 
     @Override
     public TaskSnapshot snapshot() {
-        int[] target = currentIndex >= 0 && currentIndex < record.positions.length
+        // PriorityAuction requests an initial snapshot before start(). Treat a
+        // structurally valid record as pending validation at that point so
+        // the UI does not briefly label every newly submitted build invalid.
+        boolean snapshotRecordValid = recordValid
+                || (phase == null && hasStructuralRecord());
+        int total = snapshotRecordValid && record != null && record.positions != null
+                ? record.positions.length : 0;
+        int[] target = snapshotRecordValid && currentIndex >= 0 && currentIndex < total
                 ? record.positions[currentIndex] : null;
         String stage = phase == null ? "initializing"
                 : phase.name().toLowerCase(java.util.Locale.ROOT);
@@ -391,8 +458,8 @@ public class BuildTask extends CompanionTask<BuildTool.BuildTaskRecord>
                 ^ ((long) Math.max(0, currentIndex) << 4)
                 ^ (phase == null ? 0L : phase.ordinal());
         return TaskSnapshot.progress(stage,
-                record.mode + " " + record.blockType,
-                completedCount, record.positions.length,
+                snapshotRecordValid ? record.mode + " " + record.blockType : "Invalid build task",
+                completedCount, total,
                 target == null ? null : target[0],
                 target == null ? null : target[1],
                 target == null ? null : target[2],
@@ -404,6 +471,21 @@ public class BuildTask extends CompanionTask<BuildTool.BuildTaskRecord>
 
     @Override
     public IntentContract intentContract() {
+        if (record == null || record.positions == null || record.positions.length == 0) {
+            return IntentContract.generic("Invalid build task",
+                    "A valid build record is required", null, null, null);
+        }
+        for (int[] position : record.positions) {
+            if (position == null || position.length != 3) {
+                return IntentContract.generic("Invalid build task",
+                        "Every build position must contain exactly three coordinates",
+                        null, null, null);
+            }
+        }
+        if (!"place".equals(record.mode) && !"clear".equals(record.mode)) {
+            return IntentContract.generic("Invalid build task",
+                    "Build mode must be 'place' or 'clear'", null, null, null);
+        }
         int currentY = TaskContext.serverPlayer(player).blockPosition().getY();
         int highestY = currentY;
         for (int[] position : record.positions) highestY = Math.max(highestY, position[1]);
@@ -426,18 +508,62 @@ public class BuildTask extends CompanionTask<BuildTool.BuildTaskRecord>
 
     @Override
     protected String successMessage() {
+        if (!recordValid) return "Build rejected: " + recordValidationError;
         return record.mode + " " + completedCount + " blocks of " + record.blockType;
     }
 
     @Override
     protected String timeoutMessage() {
+        if (!recordValid) return "Build rejected: " + recordValidationError;
         return "Build timed out after " + completedCount + "/" + record.positions.length
                 + " positions (" + record.mode + ")";
     }
 
     @Override
     protected String failureMessage() {
+        if (!recordValid) return "Build rejected: " + recordValidationError;
         if (failReason != null) return failReason;
         return "Build failed after " + completedCount + "/" + record.positions.length + " positions";
+    }
+
+    /** Validate the public task payload before any world/path access occurs. */
+    private String validateRecord() {
+        if (record == null) return "Build task record is null";
+        if (!"place".equals(record.mode) && !"clear".equals(record.mode)) {
+            return "Build mode must be 'place' or 'clear'";
+        }
+        if ("place".equals(record.mode)
+                && (record.blockType == null || record.blockType.isBlank())) {
+            return "Place builds require a block type";
+        }
+        if (record.positions == null || record.positions.length == 0) {
+            return "Build positions must be non-empty";
+        }
+        if (record.positions.length > 512) return "Build positions exceed the 512-cell limit";
+        var level = TaskContext.serverPlayer(player).serverLevel();
+        for (int[] position : record.positions) {
+            if (position == null || position.length != 3) {
+                return "Every build position must contain exactly three coordinates";
+            }
+            BlockPos pos = new BlockPos(position[0], position[1], position[2]);
+            if (position[1] < level.getMinBuildHeight()
+                    || position[1] >= level.getMaxBuildHeight()
+                    || !level.getWorldBorder().isWithinBounds(pos)) {
+                return "Build position is outside the current world bounds";
+            }
+        }
+        return null;
+    }
+
+    private boolean hasStructuralRecord() {
+        if (record == null || record.positions == null || record.positions.length == 0
+                || record.positions.length > 512) return false;
+        if (!"place".equals(record.mode) && !"clear".equals(record.mode)) return false;
+        if ("place".equals(record.mode)
+                && (record.blockType == null || record.blockType.isBlank())) return false;
+        for (int[] position : record.positions) {
+            if (position == null || position.length != 3) return false;
+        }
+        return true;
     }
 }

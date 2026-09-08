@@ -170,6 +170,7 @@ public class SpawnCompanionScreen extends Screen {
         });
         protocolField.setResponder(ignored -> {
             if (!applyingServerConfig) protocolEdited = true;
+            updateCredentialHint();
         });
         baseUrlField.setResponder(ignored -> {
             if (!applyingServerConfig) baseUrlEdited = true;
@@ -189,6 +190,7 @@ public class SpawnCompanionScreen extends Screen {
                         innerWidth - actionWidth - actionGap, BUTTON_HEIGHT).build());
 
         applyingServerConfig = false;
+        updateCredentialHint();
         this.setInitialFocus(nameField);
         MineAgentClientController.sendUiAction(new ClientUiActionPayload(
                 NIL_UUID, "request_llm_config", ""));
@@ -251,9 +253,7 @@ public class SpawnCompanionScreen extends Screen {
         serverProtocol = protocol;
         serverModel = model == null ? "" : model.trim();
         serverBaseUrl = normalizeBase(resolvedBase);
-        apiKeyField.setHint(Component.translatable(hasStoredApiKey
-                ? "screen.mineagent.apikey_saved_hint"
-                : "screen.mineagent.apikey_required_hint"));
+        updateCredentialHint();
         applyingServerConfig = false;
     }
 
@@ -316,6 +316,19 @@ public class SpawnCompanionScreen extends Screen {
         if (apiKeyField == null) return;
         apiKeyField.setFormatter((value, offset) -> FormattedCharSequence.forward(
                 revealApiKey ? value : "*".repeat(value.length()), Style.EMPTY));
+    }
+
+    /** Keep the credential hint protocol-aware without ever echoing a secret. */
+    private void updateCredentialHint() {
+        if (apiKeyField == null) return;
+        if (apiKeyConfigured) {
+            apiKeyField.setHint(Component.translatable("screen.mineagent.apikey_saved_hint"));
+            return;
+        }
+        String protocol = protocolField == null ? "" : protocolField.getValue().trim();
+        apiKeyField.setHint(Component.translatable("aws-bedrock".equalsIgnoreCase(protocol)
+                ? "screen.mineagent.bedrock_credentials_hint"
+                : "screen.mineagent.apikey_required_hint"));
     }
 
     private void doSpawn() {

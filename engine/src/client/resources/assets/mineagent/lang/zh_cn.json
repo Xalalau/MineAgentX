@@ -31,6 +31,7 @@
   "screen.mineagent.baseurl_hint": "官方、兼容中转或自托管接口地址",
   "screen.mineagent.apikey_saved_hint": "留空则安全复用服务器已保存的密钥",
   "screen.mineagent.apikey_required_hint": "接口需要鉴权时填写；无鉴权本地服务可留空",
+  "screen.mineagent.bedrock_credentials_hint": "Bedrock：JSON AWS 凭据（accessKeyId/secretAccessKey/region），或 bearer:/api-key: 中转令牌",
   "screen.mineagent.temperature_hint": "0.0 至 2.0；留空保持不变",
   "screen.mineagent.effort_hint": "留空则使用模型默认值",
   "screen.mineagent.effort_runtime_hint": "仅作用于在线伙伴",

@@ -7,6 +7,22 @@ English | [简体中文](README.md)
 
 MineAgent is an LLM-driven AI companion mod for Minecraft 1.21.1. It creates a server-side fake player with no real client connection and lets an AI interact with the world through movement, gathering, mining, building, combat, crafting, inventory management, and survival instincts.
 
+## v0.4.0: Stages 0–9 cognition, execution, adaptation, and teamwork
+
+This release closes stages 0–9 as one testable engineering loop:
+
+- **Stages 0/1 — Provider and Responses negotiation**: unified `api/llm` contracts, native Responses/function-call/opaque reasoning/compaction state, capability negotiation, previous-response recovery, 404/405 Chat Completions fallback, and per-companion sessions.
+- **Stage 2 — Cognitive state and persistence**: `CognitiveState` journal/projection/checkpoint, layered memory, migration, and quarantine of corrupt files; only verified evidence is restored, never cross-restart body ownership.
+- **Stage 3 — World facts and action transactions**: semantic world model, transaction ledger, action pre/postconditions, and exactly-once callbacks; movement, mining, placement, equipment, transfer, complex use, and combat terminate from authoritative server state.
+- **Stage 4 — Planning and recovery**: strategic acceptance conditions, rolling plans, suffix repair, resource reservations, asset reuse, fallback plans, and stall detection; reset/restart cannot resurrect a ghost plan.
+- **Stage 5 — Unfamiliar-mechanism adaptation**: environment/registry fingerprints, risk- and compensation-bounded probes, competing hypotheses, counterexample invalidation, and executable adaptation skills.
+- **Stage 6 — Layered retrieval**: working, episodic, semantic, procedural, and team memory are recalled by goal relevance, reliability, decay, and environment scope; repeated heartbeats do not create fake evidence.
+- **Stage 7 — Context and efficiency**: stable prompt prefixes, incremental Responses history, cache keys, dynamic tool surfaces, output budgets, deadlines/circuit breakers, and local token/cache/action metrics.
+- **Stage 8 — Teamwork**: owner-scoped blackboard, objective commitments, roles, support requests, TTL leases, disconnect/death/despawn reclamation, and duplicate-objective detection.
+- **Stage 9 — Verification and release**: Fabric regression tests, API/memory/planning/skill/transaction/team/telemetry coverage, and JDK 21 Fabric+NeoForge builds.
+
+These are verifiable code-level capabilities, not proof of human-level AGI, 100% compatibility with arbitrary mods, or guaranteed completion. Fabric is the supported loader and NeoForge remains experimental; from-scratch Ender Dragon completion, long survival, and modpack completion rates require long-running tests in a real world.
+
 ## v0.3.6: independent game-mode control
 
 - Configure & Create now offers Survival, Creative, Adventure, and Hardcore. Omitted, blank, and legacy setup requests explicitly default to Survival.
@@ -22,6 +38,8 @@ MineAgent is an LLM-driven AI companion mod for Minecraft 1.21.1. It creates a s
 - Stable `openai-compatible`, `anthropic-compatible`, and `gemini-compatible` protocol IDs are built in. The previous nine vendor IDs remain compatibility aliases, so old configuration and stored companions continue to work.
 - Setup uses a dedicated atomic network payload instead of slash commands containing credentials. The server returns only a non-secret summary, failed creation cannot leave a partially updated tuple, and a saved key is not reused after the connection target changes.
 - The OpenAI-compatible adapter supports unauthenticated local Ollama, LM Studio, and vLLM endpoints. Official and relay endpoints still reject missing/invalid credentials according to their own auth rules, while native Anthropic and Gemini adapters validate the key before a request. Host roots, `/v1` roots, and complete endpoints are normalized without duplicated paths.
+- Anthropic Messages defaults to the official `x-api-key` header and accepts explicit `bearer:` or `api-key:` prefixes for relays; Gemini sends both Google's supported `x-goog-api-key` header and the compatible query key.
+- Add the `aws-bedrock` adapter (alias `bedrock`) for AWS Bedrock Runtime Converse's unified messages and tool use. Official endpoints use SigV4. The API-key field accepts JSON AWS credentials (`accessKeyId`, `secretAccessKey`, optional `sessionToken`, `region`) or `accessKeyId|secretAccessKey|sessionToken|region`. Custom relays must explicitly use a `bearer:` or `api-key:` token; secrets are never logged. Bedrock model IDs remain open, while model-specific `InvokeModel` bodies are intentionally outside this adapter.
 
 ### Model and API compatibility
 
@@ -30,9 +48,19 @@ MineAgent is an LLM-driven AI companion mod for Minecraft 1.21.1. It creates a s
 | `openai-compatible` | Chat Completions + function calling | Compatible official APIs, relays, aggregators, and local servers |
 | `anthropic-compatible` | Anthropic Messages + tools | Anthropic and relays preserving its protocol/auth semantics |
 | `gemini-compatible` | Gemini `generateContent` + function calling | Google and relays preserving its protocol semantics |
+| `aws-bedrock` (`bedrock`) | AWS Runtime Converse + tool use | Official Bedrock endpoints (SigV4) or relays explicitly supporting Converse |
+| `aws-bedrock-invoke` | Common Bedrock `InvokeModel` profiles (Anthropic, Nova, Mistral, Llama, Cohere, Titan) | Matching official Bedrock endpoints (SigV4) or relays implementing that profile |
+| `azure-openai` | Azure OpenAI deployment + `api-version` Chat Completions | Azure official endpoints (API key or Entra bearer) and compatible relays |
+| `vertex-ai` | Vertex AI Gemini `generateContent` + OAuth/service account | Official Google Vertex endpoints (OAuth) and compatible relays |
+| `cohere` | Cohere Chat API v2 | Official Cohere `/v2/chat` and compatible relays |
+| `ai21` | AI21 Jamba Studio Chat Completions | Official AI21 Studio endpoint and compatible relays |
+| `baidu-qianfan` | Qianfan ERNIE RPC chat + OAuth | Official Baidu Qianfan endpoint (access token or AK/SK) |
+| `tencent-hunyuan` | Tencent Hunyuan ChatCompletions + TC3 signing | Official Tencent endpoint (SecretId/SecretKey) and compatible relays |
+| `bytedance-ark` | Volcengine Ark v3 Chat Completions | Official Ark endpoint and compatible relays |
+| `ollama` | Native Ollama `/api/chat` (non-NDJSON) | Local or self-hosted Ollama servers |
 | Custom registered ID | `LLMProviderRegistry` extension | Private or new protocols supplied by another mod or a later release |
 
-MineAgent does not maintain a model-name allow-list, so a compatible endpoint's new model normally works by entering its new ID. A future private API that has not been published and is incompatible with all three built-in protocols cannot truthfully be guaranteed in advance; it requires an `LLMProvider` adapter. This is a protocol boundary, not a vendor-name restriction.
+MineAgent does not maintain a model-name allow-list, so a compatible endpoint's new model normally works by entering its new ID. `InvokeModel` is deliberately limited to the stable profiles listed above; other Bedrock private bodies, new vendor fields, and unpublished future protocols require a new profile or an `LLMProvider` adapter. This is a protocol boundary, not a vendor-name restriction.
 
 ## v0.3.1: complex single-player task closure
 
@@ -171,8 +199,8 @@ $env:JAVA_HOME = 'C:\Path\To\jdk-21'
 
 Outputs:
 
-- `fabric/build/libs/mineagent-fabric-0.3.6.jar`
-- `neoforge/build/libs/mineagent-neoforge-0.3.6.jar`
+- `fabric/build/libs/mineagent-fabric-0.4.0.jar`
+- `neoforge/build/libs/mineagent-neoforge-0.4.0.jar`
 
 ## Modules
 

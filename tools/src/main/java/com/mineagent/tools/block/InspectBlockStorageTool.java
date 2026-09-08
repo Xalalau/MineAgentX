@@ -6,6 +6,7 @@ import com.mineagent.api.agent.tool.Schema;
 import com.mineagent.api.agent.tool.Tool;
 import com.mineagent.api.agent.tool.ToolArgs;
 import com.mineagent.api.entity.AgentPlayer;
+import com.mineagent.engine.act.BlockTargeting;
 import com.mineagent.engine.entity.CompanionEntity;
 import com.mineagent.engine.task.TaskContext;
 import com.mineagent.engine.world.WorldAssetIndex;
@@ -52,11 +53,15 @@ public class InspectBlockStorageTool implements Tool {
             reply.accept(ToolArgs.errorJson("Container position is outside the loaded world."));
             return;
         }
-        if (sp.getEyePosition().distanceTo(pos.getCenter()) > 5.0) {
-            // The old implementation provided unlimited x-ray access to any
-            // coordinate and could force remote chunks to load. Keep this
-            // query within the same reach envelope as a normal interaction.
-            reply.accept(ToolArgs.errorJson("Container is outside interaction range."));
+        if (BlockTargeting.findVisibleHit(sp, pos,
+                BlockTargeting.interactionReach(sp)).isEmpty()) {
+            // Distance alone is not a valid interaction predicate: a wall can
+            // hide a chest that is only one block away. Use the same sampled
+            // outline ray test as placement/use/breaking so inspection cannot
+            // become an x-ray read path and the model receives honest
+            // visibility evidence.
+            reply.accept(ToolArgs.errorJson(
+                    "Container is outside interaction range or is blocked from view."));
             return;
         }
 

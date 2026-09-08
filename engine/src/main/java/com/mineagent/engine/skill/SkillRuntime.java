@@ -81,6 +81,15 @@ public final class SkillRuntime {
     @FunctionalInterface
     public interface ActionDispatcher {
         DispatchResult dispatch(String actionId, String tool, JsonObject arguments);
+
+        /**
+         * Best-effort cancellation for an asynchronous inner task.  The
+         * default keeps third-party test/integration dispatchers source
+         * compatible; the engine implementation cancels the exact task id
+         * through PriorityAuction so a timed-out skill cannot leave a body
+         * task running while the planner has already moved on.
+         */
+        default void cancel(String actionId) { }
     }
 
     @FunctionalInterface
@@ -300,26 +309,46 @@ public final class SkillRuntime {
     private void failStep(String evidence, long gameTick) {
         Step step = steps.get(stepIndex);
         lastEvidence = normalize(evidence, "step failed");
+        String actionToCancel = activeActionId;
+        boolean cancelAsync = status == Status.WAITING_TASK;
         activeActionId = null;
         updatedTick = Math.max(updatedTick, gameTick);
         if (step.failurePolicy() == FailurePolicy.RETRY_ONCE
                 && attempt < step.maxAttempts() && transientFailure(lastEvidence)) {
             status = Status.RUNNING;
+            if (cancelAsync) cancelDispatchedAction(actionToCancel);
             return;
         }
         library.recordResult(skillName, false);
         Status terminal = step.failurePolicy() == FailurePolicy.ABORT
                 ? Status.FAILED : Status.NEEDS_REPLAN;
+        if (cancelAsync) cancelDispatchedAction(actionToCancel);
         terminal(terminal, "step " + (stepIndex + 1) + " " + step.tool()
                 + " failed: " + lastEvidence, gameTick);
     }
 
     private void terminal(Status terminalStatus, String evidence, long gameTick) {
+        String actionToCancel = activeActionId;
+        boolean cancelAsync = status == Status.WAITING_TASK;
         status = terminalStatus;
         lastEvidence = normalize(evidence, terminalStatus.name());
         activeActionId = null;
         updatedTick = Math.max(updatedTick, gameTick);
+        if (cancelAsync) cancelDispatchedAction(actionToCancel);
         completionSink.completed(snapshot());
+    }
+
+    private void cancelDispatchedAction(String actionId) {
+        if (actionId == null || actionId.isBlank()) return;
+        try {
+            dispatcher.cancel(actionId);
+        } catch (Throwable failure) {
+            // Cancellation is a safety cleanup. Never let a platform-specific
+            // cancellation failure take down the server tick or hide the
+            // already-recorded skill failure.
+            lastEvidence = normalize(lastEvidence + "; cancellation failed: "
+                    + failure.getMessage(), lastEvidence);
+        }
     }
 
     private boolean effectsVerified(Step step, long gameTick) {

@@ -28,7 +28,7 @@ public final class LLMProviderRegistry {
      */
     public static Optional<LLMProvider> detectForModel(String model) {
         for (var provider : PROVIDERS.values()) {
-            if (provider.supportsModel(model)) {
+            if (provider.autoDetectable() && provider.supportsModel(model)) {
                 return Optional.of(provider);
             }
         }

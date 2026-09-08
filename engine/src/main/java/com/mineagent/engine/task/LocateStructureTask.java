@@ -37,7 +37,7 @@ public final class LocateStructureTask
     @Override
     protected TaskState onTick() {
         var sp = TaskContext.serverPlayer(player);
-        if (sp.level().getGameTime() >= record.deadline()) return TaskState.FAILED;
+        if (record.deadline() > 0L && sp.level().getGameTime() >= record.deadline()) return TaskState.FAILED;
         if (searched) return foundPos != null ? TaskState.SUCCESS : TaskState.FAILED;
         searched = true;
 

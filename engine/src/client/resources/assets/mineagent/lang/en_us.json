@@ -31,6 +31,7 @@
   "screen.mineagent.baseurl_hint": "Official, compatible relay, or self-hosted endpoint",
   "screen.mineagent.apikey_saved_hint": "Blank securely reuses the key stored by the server",
   "screen.mineagent.apikey_required_hint": "Enter when required; unauthenticated local services may stay blank",
+  "screen.mineagent.bedrock_credentials_hint": "Bedrock: JSON AWS credentials (accessKeyId/secretAccessKey/region), or bearer:/api-key: relay token",
   "screen.mineagent.temperature_hint": "0.0 to 2.0; blank keeps current",
   "screen.mineagent.effort_hint": "Blank uses the model default",
   "screen.mineagent.effort_runtime_hint": "Online companion only",

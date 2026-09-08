@@ -113,6 +113,18 @@ public class PriorityAuction {
         } else if (currentTask != null) {
             idle.reset();
             try {
+                // Task implementations also check their own domain-specific
+                // deadlines, but the auction is the single owner of body
+                // lifetime.  Enforce the record deadline here as a final
+                // guard so a newly added/custom task cannot run forever just
+                // because it forgot one tick-level check.
+                long now = gameTime();
+                if (currentTask.record().deadline() > 0L
+                        && now >= currentTask.record().deadline()) {
+                    finishCurrentTask(TaskState.FAILED, null);
+                    currentWinner = winner;
+                    return winner;
+                }
                 if (taskPaused && !resumeCurrentTask()) {
                     currentWinner = winner;
                     return winner;

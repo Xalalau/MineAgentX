@@ -17,6 +17,7 @@ import net.minecraft.world.phys.AABB;
 public final class WaitForTask extends CompanionTask<WaitForTool.WaitForTaskRecord>
         implements IntentAwareTask {
     private long startedTick;
+    private boolean started;
     private int stable;
     private boolean done;
     private String failReason;
@@ -26,7 +27,13 @@ public final class WaitForTask extends CompanionTask<WaitForTool.WaitForTaskReco
     }
 
     @Override protected void onStart() {
-        if (startedTick <= 0L) startedTick = now();
+        // Tick zero is a valid world time. Using startedTick<=0 as an
+        // initialization sentinel allowed every resume at tick 0 (and the
+        // first resume after it) to reset the elapsed timer indefinitely.
+        if (!started) {
+            startedTick = now();
+            started = true;
+        }
         stable = 0;
         done = false;
         failReason = null;
@@ -41,6 +48,18 @@ public final class WaitForTask extends CompanionTask<WaitForTool.WaitForTaskReco
     }
 
     @Override protected TaskState onTick() {
+        if (record == null) {
+            // Task records normally originate from validated tool arguments,
+            // but scheduler extensions may construct them directly. Fail
+            // deterministically instead of letting a malformed record escape
+            // as a NullPointerException from the deadline check below.
+            failReason = "Wait task record is null";
+            return TaskState.FAILED;
+        }
+        if (record.kind == null || record.kind.isBlank()) {
+            failReason = "Wait task kind is missing";
+            return TaskState.FAILED;
+        }
         long tick = now();
         if (record.deadline() > 0L && tick >= record.deadline()) {
             failReason = "Condition timed out after waiting "
@@ -49,7 +68,7 @@ public final class WaitForTask extends CompanionTask<WaitForTool.WaitForTaskReco
         }
         boolean satisfied = condition(tick);
         stable = satisfied ? stable + 1 : 0;
-        if (stable >= record.stableTicks) {
+        if (stable >= Math.max(1, record.stableTicks)) {
             done = true;
             return TaskState.SUCCESS;
         }
@@ -57,6 +76,7 @@ public final class WaitForTask extends CompanionTask<WaitForTool.WaitForTaskReco
     }
 
     private boolean condition(long tick) {
+        if (record.kind == null) return false;
         var sp = TaskContext.serverPlayer(player);
         return switch (record.kind) {
             case "duration" -> tick - startedTick >= record.durationTicks;
@@ -80,7 +100,8 @@ public final class WaitForTask extends CompanionTask<WaitForTool.WaitForTaskReco
         if (fact == null || fact.confidenceAt(tick) < 0.6) return false;
         if ("present".equals(record.comparison)) return true;
         if ("equals".equals(record.comparison)) return "*".equals(record.value)
-                || fact.value().equalsIgnoreCase(record.value);
+                || (record.value != null && fact.value().equalsIgnoreCase(record.value));
+        if (record.value == null) return false;
         try {
             double actual = Double.parseDouble(fact.value());
             double expected = Double.parseDouble(record.value);
@@ -90,12 +111,18 @@ public final class WaitForTask extends CompanionTask<WaitForTool.WaitForTaskReco
 
     private boolean menuSlotCondition(net.minecraft.server.level.ServerPlayer sp) {
         var menu = sp.containerMenu;
-        if (menu == null || menu == sp.inventoryMenu) return false;
         ItemStack stack;
         if ("player".equals(record.endpoint)) {
+            // The player endpoint is the always-present player inventory. It
+            // must work while no GUI is open; requiring a non-inventory menu
+            // here made valid backpack waits fail forever.
             if (record.slot < 0 || record.slot >= sp.getInventory().getContainerSize()) return false;
             stack = sp.getInventory().getItem(record.slot);
         } else {
+            // A container endpoint is meaningful only while that container
+            // menu is actually open. Never read a stale or player-inventory
+            // slot as if it belonged to a world container.
+            if (menu == null || menu == sp.inventoryMenu) return false;
             if (record.slot < 0 || record.slot >= menu.slots.size()) return false;
             stack = menu.getSlot(record.slot).getItem();
         }
@@ -174,26 +201,32 @@ public final class WaitForTask extends CompanionTask<WaitForTool.WaitForTaskReco
     @Override protected void onInterrupt() { }
 
     @Override public TaskSnapshot snapshot() {
-        long elapsed = Math.max(0L, now() - startedTick);
-        boolean positioned = "block".equals(record.kind) || "entity".equals(record.kind);
-        return TaskSnapshot.progress(record.kind, "Waiting for " + record.kind,
-                stable, record.stableTicks,
-                positioned ? record.x : null, positioned ? record.y : null,
-                positioned ? record.z : null,
+        long elapsed = !started ? 0L : Math.max(0L, now() - startedTick);
+        String kind = record == null || record.kind == null ? "invalid" : record.kind;
+        boolean positioned = "block".equals(kind) || "entity".equals(kind);
+        int requiredStable = record == null ? 1 : Math.max(1, record.stableTicks);
+        return TaskSnapshot.progress(kind, "Waiting for " + kind,
+                stable, requiredStable,
+                positioned && record != null ? record.x : null,
+                positioned && record != null ? record.y : null,
+                positioned && record != null ? record.z : null,
                 done ? null : failReason,
-                "elapsed_ticks=" + elapsed + " stable=" + stable + "/" + record.stableTicks,
+                "elapsed_ticks=" + elapsed + " stable=" + stable + "/" + requiredStable,
                 (elapsed << 8) ^ stable);
     }
 
     @Override public IntentContract intentContract() {
-        return new IntentContract("Wait for " + record.kind,
+        String kind = record == null || record.kind == null ? "condition" : record.kind;
+        return new IntentContract("Wait for " + kind,
                 "The requested server condition remains true for the required stability window",
                 null, null, null, IntentContract.TerrainPolicy.CONSERVATIVE,
                 java.util.List.of());
     }
 
     @Override protected String successMessage() {
-        return "Condition '" + record.kind + "' verified for " + record.stableTicks + " ticks";
+        if (record == null) return "Wait condition verified";
+        return "Condition '" + record.kind + "' verified for "
+                + Math.max(1, record.stableTicks) + " ticks";
     }
     @Override protected String timeoutMessage() {
         return failReason == null ? "Wait condition timed out" : failReason;

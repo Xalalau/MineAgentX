@@ -499,6 +499,12 @@ public final class MechanismExplorer {
                 if (budget != null) budgets.put(canonical(budget.subject()), budget);
             }
             revision = Math.max(0L, state.revision()) + 1L;
+        } else {
+            // importState(null) is the explicit in-memory reset path used by
+            // MemoryPersistence.clearAll(); rebuild adaptation from empty
+            // knowledge rather than retaining stale mod rules.
+            knowledgeBase.importState(null);
+            revision++;
         }
         adaptationRuntime.rebuild(knowledgeBase.rules());
         trim();

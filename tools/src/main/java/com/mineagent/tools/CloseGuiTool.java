@@ -40,9 +40,19 @@ public class CloseGuiTool implements Tool {
 
         if (sp.containerMenu != sp.inventoryMenu) {
             sp.closeContainer();
-            reply.accept("{\"success\":true,\"message\":\"Container GUI closed.\"}");
+            JsonObject result = new JsonObject();
+            result.addProperty("success", true);
+            result.addProperty("message", "Container GUI closed.");
+            result.addProperty("postcondition_verified",
+                    sp.containerMenu == sp.inventoryMenu);
+            reply.accept(result.toString());
         } else {
-            reply.accept("{\"success\":true,\"message\":\"No container GUI was open.\"}");
+            JsonObject result = new JsonObject();
+            result.addProperty("success", true);
+            result.addProperty("message", "No container GUI was open.");
+            // Idempotent success is still grounded in the current menu object.
+            result.addProperty("postcondition_verified", true);
+            reply.accept(result.toString());
         }
     }
 }

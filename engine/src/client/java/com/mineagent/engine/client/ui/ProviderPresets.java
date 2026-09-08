@@ -29,6 +29,22 @@ public final class ProviderPresets {
                     "claude-sonnet-4-20250514", "https://api.anthropic.com"),
             preset("gemini", "Google Gemini", "gemini-compatible",
                     "gemini-2.5-flash", "https://generativelanguage.googleapis.com"),
+            preset("aws-bedrock", "AWS Bedrock Converse", "aws-bedrock",
+                    "anthropic.claude-3-5-sonnet-20241022-v2:0",
+                    "https://bedrock-runtime.us-east-1.amazonaws.com"),
+            preset("aws-bedrock-invoke", "AWS Bedrock InvokeModel", "aws-bedrock-invoke",
+                    "anthropic.claude-3-5-sonnet-20241022-v2:0",
+                    "https://bedrock-runtime.us-east-1.amazonaws.com"),
+            preset("azure-openai", "Azure OpenAI", "azure-openai",
+                    "gpt-4o", "https://YOUR_RESOURCE.openai.azure.com"),
+            preset("vertex-ai", "Google Vertex AI", "vertex-ai",
+                    "gemini-2.5-flash", "https://us-central1-aiplatform.googleapis.com"),
+            preset("cohere", "Cohere", "cohere", "command-a-03-2025", "https://api.cohere.com"),
+            preset("ai21", "AI21 Jamba", "ai21", "jamba-1.5-large", "https://api.ai21.com/studio/v1"),
+            preset("baidu-qianfan", "Baidu Qianfan", "baidu-qianfan", "ernie-4.5-turbo-128k", "https://aip.baidubce.com"),
+            preset("tencent-hunyuan", "Tencent Hunyuan", "tencent-hunyuan", "hunyuan-turbo", "https://hunyuan.tencentcloudapi.com"),
+            preset("bytedance-ark", "ByteDance Ark", "bytedance-ark", "doubao-seed-1-6-250615", "https://ark.cn-beijing.volces.com/api/v3"),
+            preset("ollama", "Ollama Native", "ollama", "llama3.2", "http://127.0.0.1:11434"),
             preset("qwen", "Alibaba Qwen", "openai-compatible",
                     "qwen-plus", "https://dashscope.aliyuncs.com/compatible-mode"),
             preset("glm", "Zhipu GLM", "openai-compatible",
@@ -59,6 +75,16 @@ public final class ProviderPresets {
         return switch (normalized) {
             case "anthropic", "anthropic-compatible" -> "anthropic-compatible";
             case "gemini", "gemini-compatible" -> "gemini-compatible";
+            case "aws-bedrock", "bedrock" -> "aws-bedrock";
+            case "aws-bedrock-invoke", "bedrock-invoke" -> "aws-bedrock-invoke";
+            case "azure", "azure-openai" -> "azure-openai";
+            case "vertex", "vertex-ai" -> "vertex-ai";
+            case "cohere" -> "cohere";
+            case "ai21", "jamba" -> "ai21";
+            case "baidu", "baidu-qianfan", "qianfan" -> "baidu-qianfan";
+            case "tencent", "tencent-hunyuan", "hunyuan" -> "tencent-hunyuan";
+            case "ark", "bytedance", "bytedance-ark" -> "bytedance-ark";
+            case "ollama" -> "ollama";
             case "openai", "deepseek", "qwen", "glm", "moonshot", "grok",
                     "minimax", "openai-compatible" -> "openai-compatible";
             // Preserve third-party adapter ids registered through

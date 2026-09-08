@@ -17,6 +17,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 
 /**
  * Event-sourced semantic memory for the companion's partially observed world.
@@ -341,6 +344,51 @@ public final class SemanticWorldModel {
 
     public synchronized long revision() {
         return revision;
+    }
+
+    /** Latest monotonic event sequence, used as an action checkpoint. */
+    public synchronized long latestSequence() {
+        return Math.max(0L, nextSequence - 1L);
+    }
+
+    /**
+     * Stable digest of the current semantic projection.  Volatile observations
+     * are included because an action must be verified against the same server
+     * evidence that planning consumed; the digest never contains prompts or
+     * live entity references.
+     */
+    public synchronized String stateHash(long gameTick) {
+        StringBuilder canonical = new StringBuilder();
+        facts.values().stream()
+                .filter(fact -> fact.activeAt(gameTick))
+                .sorted(Comparator.comparing(SemanticFact::key))
+                .forEach(fact -> canonical.append(fact.key()).append('=')
+                        .append(fact.value()).append('@')
+                        .append(fact.position() == null ? "" : fact.position().compact())
+                        .append(';'));
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(canonical.toString().getBytes(StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(digest, 0, 8);
+        } catch (NoSuchAlgorithmException impossible) {
+            return Integer.toHexString(canonical.toString().hashCode());
+        }
+    }
+
+    /** Compact correlated evidence for the action ledger and prompt context. */
+    public synchronized String deltaSummarySince(long sequence, int limit) {
+        if (limit <= 0) return "";
+        StringBuilder out = new StringBuilder();
+        events.stream().filter(event -> event.sequence() > sequence)
+                .sorted(Comparator.comparingLong(SemanticEvent::sequence))
+                .limit(Math.min(16, limit))
+                .forEach(event -> {
+                    if (out.length() > 0) out.append("; ");
+                    out.append(event.type().name().toLowerCase(Locale.ROOT)).append(' ')
+                            .append(event.subject()).append('.')
+                            .append(event.predicate()).append('=').append(event.value());
+                });
+        return compact(out.toString(), 640);
     }
 
     public synchronized State exportState() {

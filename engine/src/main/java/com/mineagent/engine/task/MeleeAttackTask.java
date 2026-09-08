@@ -37,6 +37,8 @@ public class MeleeAttackTask extends CompanionTask<MeleeAttackTool.MeleeAttackTa
     private net.minecraft.core.BlockPos lastNavTarget;
     private String failReason;
     private int strikesLanded;
+    /** True only after the requested target passed the start-time checks. */
+    private boolean startedSuccessfully;
 
     public MeleeAttackTask(AgentPlayer player, MeleeAttackTool.MeleeAttackTaskRecord record) {
         super(player, record);
@@ -50,6 +52,7 @@ public class MeleeAttackTask extends CompanionTask<MeleeAttackTool.MeleeAttackTa
         lastNavTarget = null;
         failReason = null;
         strikesLanded = 0;
+        startedSuccessfully = false;
 
         // Resolve target entity
         ServerLevel level = TaskContext.serverPlayer(player).serverLevel();
@@ -62,6 +65,7 @@ public class MeleeAttackTask extends CompanionTask<MeleeAttackTool.MeleeAttackTa
         if (target.level() != TaskContext.serverPlayer(player).level()) {
             failReason = "Target moved to another dimension";
             phase = Phase.DONE;
+            return;
         }
 
         PathCaches caches = TaskContext.navCaches(player);
@@ -81,11 +85,25 @@ public class MeleeAttackTask extends CompanionTask<MeleeAttackTool.MeleeAttackTa
         });
 
         navigateToTarget();
+        startedSuccessfully = true;
     }
 
     @Override
     protected void onResume() {
         int verifiedStrikes = strikesLanded;
+        // A target may die in the same server tick as a successful swing and
+        // before the scheduler publishes the terminal task state. Re-running
+        // onStart would treat the removed entity as an invalid request and
+        // incorrectly report failure instead of preserving the kill result.
+        if (target != null && !target.isAlive()) {
+            strikesLanded = verifiedStrikes;
+            phase = Phase.DONE;
+            failReason = null;
+            startedSuccessfully = true;
+            if (nav != null) nav.cancel();
+            TaskContext.inputDriver(player).clear();
+            return;
+        }
         onStart();
         strikesLanded = verifiedStrikes;
     }
@@ -94,7 +112,7 @@ public class MeleeAttackTask extends CompanionTask<MeleeAttackTool.MeleeAttackTa
     protected TaskState onTick() {
         // Timeout check
         long gameTime = TaskContext.serverPlayer(player).level().getGameTime();
-        if (gameTime >= record.deadline()) {
+        if (record.deadline() > 0L && gameTime >= record.deadline()) {
             cancelNav();
             return TaskState.FAILED;
         }
@@ -110,6 +128,14 @@ public class MeleeAttackTask extends CompanionTask<MeleeAttackTool.MeleeAttackTa
         if (!player.isAlive()) {
             failReason = "Companion died";
             phase = Phase.DONE;
+        }
+
+        // A target that was invalid at task creation is a failed request, not
+        // a successful kill. Only a task that actually passed its start-time
+        // validation may use target disappearance as the kill postcondition.
+        if (!startedSuccessfully) {
+            cancelNav();
+            return TaskState.FAILED;
         }
 
         // Check if target is gone

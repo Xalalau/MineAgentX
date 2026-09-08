@@ -7,6 +7,22 @@
 
 MineAgent 是面向 Minecraft 1.21.1 的 LLM 驱动 AI 伴游模组。它在服务端创建无真实网络连接的假玩家，并让 AI 通过移动、采集、挖掘、建造、战斗、合成、物品管理和生存本能与世界交互。
 
+## v0.4.0：阶段 0–9 认知、执行与协作闭环
+
+这一版按阶段 0–9 收口为一个可验证的工程闭环：
+
+- **阶段 0/1 — Provider 与 Responses 协商**：统一 `api/llm` 契约，原生 Responses/function-call/opaque reasoning/compaction 状态，能力协商、前一响应恢复、404/405 Chat Completions 回退和每个 companion 独立会话。
+- **阶段 2 — 认知状态与持久化**：`CognitiveState` journal/projection/checkpoint、分层记忆、迁移与损坏文件隔离；持久化只恢复经验证证据，不恢复跨重启的身体所有权。
+- **阶段 3 — 世界事实与动作事务**：语义世界模型、动作事务账本、工具前后置条件和 exactly-once 回调；移动、挖掘、放置、装备、转移、复杂使用和战斗以服务器状态验收。
+- **阶段 4 — 规划与恢复**：战略验收条件、滚动计划、后缀修复、资源预留、资产复用、备用计划和停滞检测；旧计划不会在 reset 或重启后作为“幽灵状态”继续驱动动作。
+- **阶段 5 — 陌生机制适应**：环境/注册表指纹、受风险与补偿约束的单步探针、竞争假设、反例失效和可执行适配技能。
+- **阶段 6 — 分层检索**：工作、情节、语义、程序和团队记忆按目标相关性、可靠性、衰减和环境范围召回，重复心跳不会伪造额外证据。
+- **阶段 7 — 上下文与效率**：稳定 prompt 前缀、Responses 增量历史、缓存键、动态工具面、输出预算、deadline/circuit-breaker 以及本地 token/cache/action 指标。
+- **阶段 8 — 团队协作**：owner-scoped 黑板、目标承诺、角色、支持请求、TTL 租约、失联/死亡/销毁回收和重复目标检测。
+- **阶段 9 — 验证与发布**：Fabric 自动测试、API/memory/planning/skill/transaction/team/telemetry 回归、JDK 21 Fabric+NeoForge 构建与双加载器产物。
+
+这些是可验证的代码级能力，不等于已经证明真人级 AGI、任意模组 100% 兼容或绝对通关率。Fabric 是正式支持平台，NeoForge 仍为实验性平台；从零击杀末影龙、长期生存和整合包完成率必须由用户在真实世界中长程测试。
+
 ## v0.3.6：独立游戏模式控制
 
 - “配置并创建 AI 伙伴”页面新增游戏模式选择，提供生存、创造、冒险和极限四种模式；未选择、空值以及旧版调用均明确默认为生存。
@@ -22,6 +38,8 @@ MineAgent 是面向 Minecraft 1.21.1 的 LLM 驱动 AI 伴游模组。它在服�
 - 新增 `openai-compatible`、`anthropic-compatible` 和 `gemini-compatible` 三个稳定协议 ID，原有九个厂商 ID 继续作为兼容别名，旧配置和已保存伙伴无需迁移。
 - 配置与创建通过专用网络 payload 原子提交，不再把 API Key 放进 slash 命令。服务端只向页面返回非敏感摘要，创建失败不会留下半更新配置；连接目标改变时也不会把旧密钥自动发送到新地址。
 - OpenAI 兼容适配器支持无鉴权的本地 Ollama、LM Studio、vLLM 等服务；官方或中转端点仍会按自身鉴权规则拒绝缺失/错误密钥，Anthropic 与 Gemini 原生协议会在请求前校验密钥。完整 endpoint、`/v1` 根地址和主机根地址都会规范化为唯一请求路径。
+- Anthropic Messages 适配器默认使用官方 `x-api-key`，兼容中转可在密钥字段使用显式 `bearer:` 或 `api-key:` 前缀；Gemini 同时发送官方支持的 `x-goog-api-key` header 和兼容的 query key。
+- 新增 `aws-bedrock`（别名 `bedrock`）适配器，使用 AWS Bedrock Runtime Converse 的统一消息和工具协议。官方 endpoint 使用 SigV4；API Key 字段可填写 JSON AWS 凭据（`accessKeyId`、`secretAccessKey`、可选 `sessionToken`、`region`），或 `accessKeyId|secretAccessKey|sessionToken|region`。自定义中转仅支持显式 `bearer:` / `api-key:` 令牌，且不会把令牌写入日志。Bedrock 的模型 ID 保持开放，不假设各厂商私有 `InvokeModel` 请求体。
 
 ### 模型与 API 兼容范围
 
@@ -30,9 +48,19 @@ MineAgent 是面向 Minecraft 1.21.1 的 LLM 驱动 AI 伴游模组。它在服�
 | `openai-compatible` | Chat Completions + function calling | OpenAI 兼容的官方接口、中转、聚合平台和本地服务 |
 | `anthropic-compatible` | Anthropic Messages + tools | Anthropic 官方接口及保持该协议与鉴权语义的中转 |
 | `gemini-compatible` | Gemini `generateContent` + function calling | Google 官方接口及保持该协议语义的中转 |
+| `aws-bedrock`（`bedrock`） | AWS Runtime Converse + tool use | Bedrock 官方 endpoint（SigV4）或明确支持 Converse 的中转 |
+| `aws-bedrock-invoke` | 常见 Bedrock `InvokeModel` profile（Anthropic、Nova、Mistral、Llama、Cohere、Titan） | 对应模型的 Bedrock 官方 endpoint（SigV4）或明确支持该 profile 的中转 |
+| `azure-openai` | Azure OpenAI deployment + `api-version` Chat Completions | Azure OpenAI 官方 endpoint（API key 或 Entra bearer）及保持该路由的中转 |
+| `vertex-ai` | Vertex AI Gemini `generateContent` + OAuth/service account | Google Vertex 官方 endpoint（OAuth）及保持该协议的中转 |
+| `cohere` | Cohere Chat API v2 | Cohere 官方 `/v2/chat` 及保持该协议的中转 |
+| `ai21` | AI21 Jamba Studio Chat Completions | AI21 Studio 官方 endpoint及保持该协议的中转 |
+| `baidu-qianfan` | 千帆 ERNIE RPC chat + OAuth | 百度千帆官方 endpoint（access token 或 AK/SK） |
+| `tencent-hunyuan` | 腾讯混元 ChatCompletions + TC3 签名 | 腾讯云官方 endpoint（SecretId/SecretKey）及保持该协议的中转 |
+| `bytedance-ark` | 火山方舟 Ark v3 Chat Completions | Ark 官方 endpoint 及保持该协议的中转 |
+| `ollama` | Ollama 原生 `/api/chat`（非 NDJSON） | 本机或自托管 Ollama 服务 |
 | 自定义注册 ID | `LLMProviderRegistry` 扩展 | 由其他模组或后续版本提供的私有/新协议适配器 |
 
-MineAgent 不按型号维护允许列表，因此兼容端点发布的新模型通常只需输入新模型 ID。尚未公开、与三种内置协议不兼容的未来私有 API 无法被当前版本预先保证，必须注册对应 `LLMProvider` 适配器；这是协议事实边界，不是厂商名称限制。
+MineAgent 不按型号维护允许列表，因此兼容端点发布的新模型通常只需输入新模型 ID。`InvokeModel` 只声明表中列出的稳定 profile；Bedrock 其他私有请求体、厂商新版本字段以及尚未公开的未来私有 API 无法由当前版本预先保证，必须增加对应 profile 或注册 `LLMProvider` 适配器。这是协议事实边界，不是厂商名称限制。
 
 ## v0.3.1：复杂单人任务闭环稳定性
 
@@ -179,8 +207,8 @@ Linux/macOS：
 
 构建产物：
 
-- `fabric/build/libs/mineagent-fabric-0.3.6.jar`
-- `neoforge/build/libs/mineagent-neoforge-0.3.6.jar`
+- `fabric/build/libs/mineagent-fabric-0.4.0.jar`
+- `neoforge/build/libs/mineagent-neoforge-0.4.0.jar`
 
 ## 项目结构
 

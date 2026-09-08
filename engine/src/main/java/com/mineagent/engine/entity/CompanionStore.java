@@ -155,7 +155,7 @@ public final class CompanionStore {
         List<SavedCompanion> all = loadAll(worldDataDir);
         List<SavedCompanion> filtered = new ArrayList<>();
         for (var c : all) {
-            if (c.ownerUuid().equals(ownerUuid)
+            if (c.ownerUuid().equalsIgnoreCase(ownerUuid)
                     && (companionName == null
                         || companionName.equalsIgnoreCase(c.companionName()))) {
                 // skip (remove)
@@ -178,7 +178,7 @@ public final class CompanionStore {
         List<SavedCompanion> updated = new ArrayList<>();
         boolean found = false;
         for (var c : all) {
-            if (c.ownerUuid().equals(companion.ownerUuid())
+            if (c.ownerUuid().equalsIgnoreCase(companion.ownerUuid())
                     && c.companionName().equalsIgnoreCase(companion.companionName())) {
                 updated.add(companion);
                 found = true;
@@ -206,7 +206,10 @@ public final class CompanionStore {
         UUID.fromString(ownerUuid);
         String companionName = requiredString(obj, "companionName");
         String providerId = requiredString(obj, "providerId");
-        String apiKey = requiredString(obj, "apiKey");
+        // Local OpenAI-compatible/Ollama/vLLM endpoints intentionally allow
+        // an empty key.  Treating apiKey as required made those companions
+        // impossible to restore after a restart even though creation worked.
+        String apiKey = optionalString(obj, "apiKey", "");
         String model = requiredString(obj, "model");
         double temperature = obj.has("temperature")
                 ? obj.get("temperature").getAsDouble() : 0.7;

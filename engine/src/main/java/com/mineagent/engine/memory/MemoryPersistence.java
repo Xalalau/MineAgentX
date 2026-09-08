@@ -11,9 +11,13 @@ import com.mineagent.engine.planning.HierarchicalRollingPlanner;
 import com.mineagent.engine.world.BeliefState;
 import com.mineagent.engine.world.WorldAssetIndex;
 import com.mineagent.engine.world.SemanticWorldModel;
+import com.mineagent.engine.world.ActionTransactionLedger;
+import com.mineagent.engine.planning.ResourceReservationLedger;
 import com.mineagent.engine.skill.SkillLibrary;
 import com.mineagent.engine.exploration.MechanismExplorer;
+import com.mineagent.engine.cognition.CognitiveState;
 import com.mineagent.api.llm.ChatMessage;
+import com.mineagent.api.llm.ProviderSessionState;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -63,13 +67,19 @@ public class MemoryPersistence {
     private static final String ROLLING_PLAN_FILE = "rolling_plan.json";
     private static final String MECHANISM_FILE = "mechanism_experiments.json";
     private static final String CONVERSATION_FILE = "conversation.json";
+    private static final String PROVIDER_SESSION_FILE = "provider_session.json";
+    private static final String COGNITIVE_STATE_FILE = "cognitive_state.json";
+    private static final String LAYERED_MEMORY_FILE = "layered_memory.json";
+    private static final String ACTION_LEDGER_FILE = "action_ledger.json";
+    private static final String RESERVATION_FILE = "reservations.json";
     // v9 adds environment-scoped mechanism profiles, evidence-weighted rules,
     // exploration budgets and adapter identities. Gson supplies safe defaults
     // for absent v1-v8 fields, so existing companion memories remain readable.
-    // Version 10 adds top-level goal acceptance and suffix-repair metadata to
-    // PlanGraph.State. Its record constructor supplies defaults for v1-v9
-    // files, so existing companion memories remain readable.
-    private static final int FORMAT_VERSION = 10;
+    // Version 11 adds the cognitive journal, tiered memory, action audit,
+    // ephemeral reservation checkpoint and provider transport session. Every
+    // new envelope carries the same version while readRoot remains compatible
+    // with v1-v10 files whose absent fields have safe record defaults.
+    private static final int FORMAT_VERSION = 11;
     private static final int MAX_DIALOGUE_PAIRS = 12;
     private static final int MAX_DIALOGUE_CHARS = 4_000;
 
@@ -90,9 +100,16 @@ public class MemoryPersistence {
     private final HierarchicalRollingPlanner rollingPlanner;
     private final MechanismExplorer mechanismExplorer;
     private final List<ChatMessage> conversationHistory;
+    private final CognitiveState cognitiveState;
+    private final LayeredMemory layeredMemory;
+    private final ActionTransactionLedger actionLedger;
+    private final ResourceReservationLedger reservationLedger;
 
     /** 上次保存时间 */
     private volatile long lastSaveTime = 0;
+    /** Transport state is kept separate from searchable gameplay memory. */
+    private volatile ProviderSessionState loadedProviderSession;
+    private volatile long lastProviderSaveTime;
 
     /**
      * @param memoryDir 该伴游专属的记忆目录（由调用方确保唯一性）
@@ -110,7 +127,11 @@ public class MemoryPersistence {
                              SemanticWorldModel semanticWorldModel,
                              HierarchicalRollingPlanner rollingPlanner,
                              MechanismExplorer mechanismExplorer,
-                             List<ChatMessage> conversationHistory) {
+                             List<ChatMessage> conversationHistory,
+                             CognitiveState cognitiveState,
+                             LayeredMemory layeredMemory,
+                             ActionTransactionLedger actionLedger,
+                             ResourceReservationLedger reservationLedger) {
         this.memoryDir = memoryDir;
         this.cognitiveMap = cognitiveMap;
         this.placeEventMemory = placeEventMemory;
@@ -125,6 +146,10 @@ public class MemoryPersistence {
         this.rollingPlanner = rollingPlanner;
         this.mechanismExplorer = mechanismExplorer;
         this.conversationHistory = conversationHistory;
+        this.cognitiveState = cognitiveState;
+        this.layeredMemory = layeredMemory;
+        this.actionLedger = actionLedger;
+        this.reservationLedger = reservationLedger;
     }
 
     /**
@@ -176,6 +201,18 @@ public class MemoryPersistence {
         try { saveConversation(); } catch (Exception e) {
             System.err.println("[MineAgent] Save conversation failed: " + e.getMessage());
         }
+        try { saveCognitiveState(); } catch (Exception e) {
+            System.err.println("[MineAgent] Save cognitive state failed: " + e.getMessage());
+        }
+        try { saveLayeredMemory(); } catch (Exception e) {
+            System.err.println("[MineAgent] Save layered memory failed: " + e.getMessage());
+        }
+        try { saveActionLedger(); } catch (Exception e) {
+            System.err.println("[MineAgent] Save action ledger failed: " + e.getMessage());
+        }
+        try { saveReservations(); } catch (Exception e) {
+            System.err.println("[MineAgent] Save reservations failed: " + e.getMessage());
+        }
         lastSaveTime = System.currentTimeMillis();
     }
 
@@ -207,10 +244,122 @@ public class MemoryPersistence {
         loadWithQuarantine(ROLLING_PLAN_FILE, "rolling plan", this::loadRollingPlan);
         loadWithQuarantine(MECHANISM_FILE, "mechanism experiments", this::loadMechanisms);
         loadWithQuarantine(CONVERSATION_FILE, "conversation", this::loadConversation);
+        loadWithQuarantine(PROVIDER_SESSION_FILE, "provider session", this::loadProviderSession);
+        loadWithQuarantine(COGNITIVE_STATE_FILE, "cognitive state", this::loadCognitiveState);
+        loadWithQuarantine(LAYERED_MEMORY_FILE, "layered memory", this::loadLayeredMemory);
+        loadWithQuarantine(ACTION_LEDGER_FILE, "action ledger", this::loadActionLedger);
+        loadWithQuarantine(RESERVATION_FILE, "reservations", this::loadReservations);
         // Do not immediately overwrite a quarantined or partially recovered
         // file on the first agent turn. The normal one-minute autosave will
         // persist the validated in-memory subset while the original remains.
         lastSaveTime = System.currentTimeMillis();
+    }
+
+    /** Persist opaque Responses metadata without exposing it to memory recall. */
+    public synchronized void saveProviderSession(ProviderSessionState state) {
+        saveProviderSession(state, false);
+    }
+
+    /** Force transport-state durability during shutdown; throttling is only for live turns. */
+    public synchronized void saveProviderSessionNow(ProviderSessionState state) {
+        saveProviderSession(state, true);
+    }
+
+    private synchronized void saveProviderSession(ProviderSessionState state, boolean force) {
+        if (state == null) return;
+        long now = System.currentTimeMillis();
+        if (!force && now - lastProviderSaveTime < 5_000L) return;
+        try {
+            JsonObject data = new JsonObject();
+            data.addProperty("version", FORMAT_VERSION);
+            data.addProperty("timestamp", now);
+            data.add("state", GSON.toJsonTree(state));
+            writeAtomic(memoryDir.resolve(PROVIDER_SESSION_FILE), GSON.toJson(data));
+            lastProviderSaveTime = now;
+        } catch (Exception failure) {
+            System.err.println("[MineAgent] Save provider session failed: " + failure.getMessage());
+        }
+    }
+
+    public ProviderSessionState loadedProviderSession() {
+        return loadedProviderSession;
+    }
+
+    private void loadProviderSession() throws IOException {
+        Path file = memoryDir.resolve(PROVIDER_SESSION_FILE);
+        if (!Files.exists(file)) return;
+        JsonObject data = readRoot(file);
+        if (!data.has("state") || !data.get("state").isJsonObject()) return;
+        loadedProviderSession = GSON.fromJson(data.get("state"), ProviderSessionState.class);
+    }
+
+    private void saveCognitiveState() throws IOException {
+        if (cognitiveState == null) return;
+        JsonObject data = new JsonObject();
+        addEnvelopeMetadata(data);
+        data.add("state", GSON.toJsonTree(cognitiveState.exportState()));
+        writeAtomic(memoryDir.resolve(COGNITIVE_STATE_FILE), GSON.toJson(data));
+    }
+
+    private void loadCognitiveState() throws IOException {
+        if (cognitiveState == null) return;
+        Path file = memoryDir.resolve(COGNITIVE_STATE_FILE);
+        if (!Files.exists(file)) return;
+        JsonObject data = readRoot(file);
+        if (!data.has("state") || !data.get("state").isJsonObject()) return;
+        CognitiveState.State state = GSON.fromJson(data.get("state"), CognitiveState.State.class);
+        cognitiveState.importState(state);
+    }
+
+    private void saveLayeredMemory() throws IOException {
+        if (layeredMemory == null) return;
+        JsonObject data = new JsonObject();
+        addEnvelopeMetadata(data);
+        data.add("state", GSON.toJsonTree(layeredMemory.exportState()));
+        writeAtomic(memoryDir.resolve(LAYERED_MEMORY_FILE), GSON.toJson(data));
+    }
+
+    private void loadLayeredMemory() throws IOException {
+        if (layeredMemory == null) return;
+        Path file = memoryDir.resolve(LAYERED_MEMORY_FILE);
+        if (!Files.exists(file)) return;
+        JsonObject data = readRoot(file);
+        if (!data.has("state") || !data.get("state").isJsonObject()) return;
+        layeredMemory.importState(GSON.fromJson(data.get("state"), LayeredMemory.State.class));
+    }
+
+    private void saveActionLedger() throws IOException {
+        if (actionLedger == null) return;
+        JsonObject data = new JsonObject();
+        addEnvelopeMetadata(data);
+        data.add("state", GSON.toJsonTree(actionLedger.exportState()));
+        writeAtomic(memoryDir.resolve(ACTION_LEDGER_FILE), GSON.toJson(data));
+    }
+
+    private void loadActionLedger() throws IOException {
+        if (actionLedger == null) return;
+        Path file = memoryDir.resolve(ACTION_LEDGER_FILE);
+        if (!Files.exists(file)) return;
+        JsonObject data = readRoot(file);
+        if (!data.has("state") || !data.get("state").isJsonObject()) return;
+        actionLedger.importState(GSON.fromJson(data.get("state"), ActionTransactionLedger.State.class));
+    }
+
+    private void saveReservations() throws IOException {
+        if (reservationLedger == null) return;
+        JsonObject data = new JsonObject();
+        addEnvelopeMetadata(data);
+        data.add("state", GSON.toJsonTree(reservationLedger.exportState()));
+        writeAtomic(memoryDir.resolve(RESERVATION_FILE), GSON.toJson(data));
+    }
+
+    private void loadReservations() throws IOException {
+        if (reservationLedger == null) return;
+        Path file = memoryDir.resolve(RESERVATION_FILE);
+        if (!Files.exists(file)) return;
+        JsonObject data = readRoot(file);
+        if (!data.has("state") || !data.get("state").isJsonObject()) return;
+        reservationLedger.importState(GSON.fromJson(data.get("state"), ResourceReservationLedger.State.class));
     }
 
     @FunctionalInterface
@@ -740,6 +889,11 @@ public class MemoryPersistence {
         }
     }
 
+    private static void addEnvelopeMetadata(JsonObject data) {
+        data.addProperty("version", FORMAT_VERSION);
+        data.addProperty("timestamp", System.currentTimeMillis());
+    }
+
     /**
      * 迁移记忆目录（伴游改名时调用）。
      * 先把当前记忆刷到旧目录，再把文件移动到新目录，后续读写都走新目录。
@@ -752,13 +906,21 @@ public class MemoryPersistence {
         try {
             if (Files.isDirectory(oldDir)) {
                 Files.createDirectories(newDir);
+                List<Path> files;
                 try (var stream = Files.list(oldDir)) {
-                    for (Path f : stream.toList()) {
-                        if (Files.isRegularFile(f)) {
-                            Files.move(f, newDir.resolve(f.getFileName().toString()),
-                                    java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                        }
-                    }
+                    files = stream.filter(Files::isRegularFile).toList();
+                }
+                // Copy the complete set first. Moving one file at a time can
+                // leave a split memory directory when the disk fills or the
+                // server stops halfway through a rename. Keeping the old set
+                // until every copy succeeds makes migration recoverable.
+                for (Path f : files) {
+                    Files.copy(f, newDir.resolve(f.getFileName().toString()),
+                            StandardCopyOption.REPLACE_EXISTING,
+                            StandardCopyOption.COPY_ATTRIBUTES);
+                }
+                for (Path f : files) {
+                    Files.deleteIfExists(f);
                 }
                 Files.deleteIfExists(oldDir);
             }
@@ -786,7 +948,46 @@ public class MemoryPersistence {
             Files.deleteIfExists(memoryDir.resolve(ROLLING_PLAN_FILE));
             Files.deleteIfExists(memoryDir.resolve(MECHANISM_FILE));
             Files.deleteIfExists(memoryDir.resolve(CONVERSATION_FILE));
-        } catch (IOException e) {
+            Files.deleteIfExists(memoryDir.resolve(PROVIDER_SESSION_FILE));
+            Files.deleteIfExists(memoryDir.resolve(COGNITIVE_STATE_FILE));
+            Files.deleteIfExists(memoryDir.resolve(LAYERED_MEMORY_FILE));
+            Files.deleteIfExists(memoryDir.resolve(ACTION_LEDGER_FILE));
+            Files.deleteIfExists(memoryDir.resolve(RESERVATION_FILE));
+            loadedProviderSession = null;
+
+            // Deleting files alone is not a reset: the same live AgentLoop
+            // would continue to expose stale plans, facts and dialogue until
+            // the companion was recreated. Clear every in-memory projection
+            // through its validated import/reset boundary as well.
+            cognitiveMap.clear();
+            placeEventMemory.clear();
+            importanceEvaluator.importWeights(Map.of(), 0);
+            reflectionSystem.clear();
+            planGraph.importState(null);
+            beliefState.importState(null);
+            worldAssetIndex.importState(null);
+            experienceStore.importAll(List.of());
+            skillLibrary.importAll(List.of());
+            semanticWorldModel.importState(null);
+            rollingPlanner.importState(null);
+            mechanismExplorer.importState(null);
+            cognitiveState.importState(null);
+            layeredMemory.importState(null);
+            actionLedger.importState(null);
+            reservationLedger.importState(null);
+            synchronized (conversationHistory) {
+                // Preserve the immutable system prompt at index zero; all
+                // owner dialogue and restored assistant turns are disposable.
+                if (conversationHistory.size() > 1) {
+                    conversationHistory.subList(1, conversationHistory.size()).clear();
+                }
+            }
+        } catch (IOException | RuntimeException e) {
+            // A malformed in-memory projection must not escape a user-issued
+            // reset command and leave the AgentLoop half-cleared. Disk files
+            // may already be gone, so the next load will still start from the
+            // validated subset; report the failure for diagnostics instead of
+            // crashing the server tick.
             System.err.println("[MineAgent] Failed to clear memories: " + e.getMessage());
         }
     }

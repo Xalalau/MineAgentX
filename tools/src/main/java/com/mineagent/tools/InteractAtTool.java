@@ -89,6 +89,17 @@ public class InteractAtTool implements Tool {
             reply.accept(ToolArgs.errorJson("Target block is outside this dimension's world bounds."));
             return;
         }
+        if (!sp.level().isLoaded(target)) {
+            // getBlockState can synchronously create/load a chunk. Tool calls
+            // run on the server thread, so allowing an unloaded coordinate
+            // here can stall the tick loop (and make a later interaction use
+            // stale navigation assumptions). Require the caller to navigate
+            // into a loaded area first, matching vanilla's local interaction
+            // semantics.
+            reply.accept(ToolArgs.errorJson(
+                    "Target block is in an unloaded chunk; move closer before interacting."));
+            return;
+        }
         if (sp.level().getBlockState(target).isAir()) {
             reply.accept(ToolArgs.errorJson("Target block is air at " + target.toShortString()));
             return;

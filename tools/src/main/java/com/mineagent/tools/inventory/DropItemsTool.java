@@ -66,6 +66,7 @@ public class DropItemsTool implements Tool {
 
         var sp = ((CompanionEntity) player).serverPlayer();
         var inv = sp.getInventory();
+        int carriedBefore = countItem(inv, itemId);
 
         // Find and count matching items
         int remaining = count;
@@ -99,15 +100,38 @@ public class DropItemsTool implements Tool {
         if (dropped == 0) {
             reply.accept(ToolArgs.errorJson("Item '" + itemId + "' not found in inventory."));
         } else {
-            // Sync inventory so the owner's client sees items removed
-            inv.setChanged();
-            sp.containerMenu.broadcastChanges();
+            // Publish both the normal inventory menu and any currently open
+            // container menu. Updating only containerMenu leaves the owner's
+            // hotbar stale when a platform keeps a separate inventory menu,
+            // which then makes the next planning snapshot reason from items
+            // that were already dropped.
+            com.mineagent.engine.task.TaskContext.syncInventory(sp);
             JsonObject result = new JsonObject();
+            int carriedAfter = countItem(inv, itemId);
             result.addProperty("success", true);
             result.addProperty("item", itemId);
             result.addProperty("dropped", dropped);
             result.addProperty("requested", count);
+            result.addProperty("carried_before", carriedBefore);
+            result.addProperty("carried_after", carriedAfter);
+            // Re-count after the ItemEntity was actually created. A callback
+            // alone is not enough because platform hooks can veto Player#drop.
+            result.addProperty("postcondition_verified",
+                    carriedAfter == carriedBefore - dropped);
             reply.accept(result.toString());
         }
+    }
+
+    private static int countItem(net.minecraft.world.entity.player.Inventory inventory,
+                                 String itemId) {
+        int total = 0;
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            var stack = inventory.getItem(slot);
+            if (!stack.isEmpty() && net.minecraft.core.registries.BuiltInRegistries.ITEM
+                    .getKey(stack.getItem()).toString().equals(itemId)) {
+                total += stack.getCount();
+            }
+        }
+        return total;
     }
 }

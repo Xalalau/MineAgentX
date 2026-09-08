@@ -2,6 +2,9 @@ package com.mineagent.engine.llm;
 
 import com.mineagent.api.llm.ChatMessage;
 import com.mineagent.api.llm.LLMResponse;
+import com.mineagent.api.llm.LLMCapabilities;
+import com.mineagent.api.llm.LLMRequest;
+import com.mineagent.api.llm.ProviderSessionState;
 import com.mineagent.api.llm.provider.LLMProvider;
 
 import java.util.List;
@@ -64,6 +67,26 @@ public final class ProtocolAliasProvider implements LLMProvider {
                                 String reasoningEffort) {
         return delegate.complete(baseUrl, apiKey, model, messages, tools,
                 temperature, maxTokens, reasoningEffort);
+    }
+
+    @Override
+    public LLMCapabilities capabilities() {
+        return delegate.capabilities();
+    }
+
+    @Override
+    public LLMResponse complete(LLMRequest request) {
+        return delegate.complete(request);
+    }
+
+    @Override
+    public ProviderSessionState sessionState(String model) {
+        return delegate.sessionState(model);
+    }
+
+    @Override
+    public void restoreSessionState(ProviderSessionState state) {
+        delegate.restoreSessionState(state);
     }
 
     @Override

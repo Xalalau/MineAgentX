@@ -29,7 +29,7 @@ final class ProviderSupport {
         }
         String scheme = uri.getScheme();
         if (!("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))
-                || uri.getHost() == null || uri.getQuery() != null
+                || uri.getHost() == null || uri.getUserInfo() != null || uri.getQuery() != null
                 || uri.getFragment() != null) {
             throw new IllegalArgumentException(provider
                     + " base URL must be an absolute HTTP(S) URL without query or fragment");
@@ -64,13 +64,21 @@ final class ProviderSupport {
     static void validateRequest(String provider, String apiKey, String model,
                                 List<ChatMessage> messages, double temperature,
                                 int maxTokens, boolean apiKeyRequired) {
+        validateRequest(provider, apiKey, model, messages, temperature,
+                maxTokens, apiKeyRequired, false);
+    }
+
+    static void validateRequest(String provider, String apiKey, String model,
+                                List<ChatMessage> messages, double temperature,
+                                int maxTokens, boolean apiKeyRequired,
+                                boolean allowEmptyMessages) {
         if (apiKeyRequired && (apiKey == null || apiKey.isBlank())) {
             throw new IllegalArgumentException(provider + " API key is not configured");
         }
         if (model == null || model.isBlank()) {
             throw new IllegalArgumentException(provider + " model is not configured");
         }
-        if (messages == null || messages.isEmpty()) {
+        if (!allowEmptyMessages && (messages == null || messages.isEmpty())) {
             throw new IllegalArgumentException(provider + " request has no messages");
         }
         if (maxTokens <= 0) {

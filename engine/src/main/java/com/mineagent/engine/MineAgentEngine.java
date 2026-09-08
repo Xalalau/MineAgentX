@@ -17,6 +17,7 @@ import com.mineagent.engine.entity.fakeplayer.FakePlayerGameMode;
 import com.mineagent.engine.llm.*;
 import com.mineagent.engine.loop.AgentLoop;
 import com.mineagent.engine.scheduler.PriorityAuction;
+import com.mineagent.engine.cognition.TeamBlackboard;
 import com.mineagent.engine.survival.*;
 import com.mineagent.engine.survival.reflex.*;
 import com.mineagent.engine.task.TaskRegistration;
@@ -133,8 +134,25 @@ public final class MineAgentEngine {
         LLMProviderRegistry.register(OpenAICompatibleProvider.moonshot());
         LLMProviderRegistry.register(OpenAICompatibleProvider.grok());
         LLMProviderRegistry.register(OpenAICompatibleProvider.minimax());
+        // Native Responses API adapter for Astra and future Responses models.
+        // It remains an explicit provider choice so existing relay configs keep
+        // using their established Chat Completions wire format.
+        LLMProviderRegistry.register(new OpenAIResponsesProvider());
         LLMProviderRegistry.register(new AnthropicProvider());
         LLMProviderRegistry.register(new GeminiProvider());
+        // AWS Bedrock's provider-neutral Runtime Converse protocol. It is kept
+        // as a separate adapter because Bedrock authentication (SigV4) and
+        // endpoint paths are not compatible with Chat Completions relays.
+        LLMProviderRegistry.register(new BedrockConverseProvider());
+        LLMProviderRegistry.register(new BedrockInvokeModelProvider());
+        LLMProviderRegistry.register(new AzureOpenAIProvider());
+        LLMProviderRegistry.register(new VertexAIProvider());
+        LLMProviderRegistry.register(new CohereProvider());
+        LLMProviderRegistry.register(new AI21Provider());
+        LLMProviderRegistry.register(new BaiduQianfanProvider());
+        LLMProviderRegistry.register(new TencentHunyuanProvider());
+        LLMProviderRegistry.register(new ByteDanceArkProvider());
+        LLMProviderRegistry.register(new OllamaNativeProvider());
         // Vendor-neutral aliases are the public compatibility boundary. Old
         // vendor ids above remain registered so existing configs and stored
         // companions keep working after the v0.3.5 migration.
@@ -147,6 +165,9 @@ public final class MineAgentEngine {
         LLMProviderRegistry.register(new ProtocolAliasProvider(
                 "gemini-compatible", "Gemini generateContent compatible",
                 new GeminiProvider()));
+        LLMProviderRegistry.register(new ProtocolAliasProvider(
+                "bedrock", "AWS Bedrock Converse compatible",
+                new BedrockConverseProvider()));
 
         // Register survival instinct chains (H1 fix)
         // Build SurvivalConfig from the loaded MineAgentConfig
@@ -816,6 +837,16 @@ public final class MineAgentEngine {
                     "minimax", "openai-compatible" -> "openai-compatible";
             case "anthropic", "anthropic-compatible" -> "anthropic-compatible";
             case "gemini", "gemini-compatible" -> "gemini-compatible";
+            case "aws-bedrock", "bedrock" -> "aws-bedrock";
+            case "aws-bedrock-invoke", "bedrock-invoke" -> "aws-bedrock-invoke";
+            case "azure", "azure-openai" -> "azure-openai";
+            case "vertex", "vertex-ai" -> "vertex-ai";
+            case "cohere" -> "cohere";
+            case "ai21", "jamba" -> "ai21";
+            case "baidu", "baidu-qianfan", "qianfan" -> "baidu-qianfan";
+            case "tencent", "tencent-hunyuan", "hunyuan" -> "tencent-hunyuan";
+            case "ark", "bytedance", "bytedance-ark" -> "bytedance-ark";
+            case "ollama" -> "ollama";
             default -> providerId.trim().toLowerCase(Locale.ROOT);
         };
     }
@@ -857,6 +888,11 @@ public final class MineAgentEngine {
             // The owner can already be absent during disconnect teardown.
             // CompanionEntity retains the stable UUID independently.
             UUID ownerUuid = state.companion.ownerUuid();
+            // Team commitments are process-live leases, not durable memory.
+            // Remove this member immediately on despawn so a replacement
+            // companion can claim the objective on the very next tick rather
+            // than waiting for the 1,200-tick lease timeout.
+            TeamBlackboard.remove(ownerUuid, companionId);
             List<UUID> list = OWNER_TO_ALL_COMPANIONS.get(ownerUuid);
             if (list != null) {
                 list.remove(companionId);
@@ -1610,7 +1646,19 @@ public final class MineAgentEngine {
 
         var savedList = com.mineagent.engine.entity.CompanionStore.loadAll(worldDataDir);
         for (var saved : savedList) {
-            if (saved.ownerUuid().equals(player.getUUID().toString())) {
+            if (saved.ownerUuid().equalsIgnoreCase(player.getUUID().toString())) {
+                // JOIN can be delivered more than once by an integrated
+                // server/reconnect sequence.  The saved record is durable,
+                // while the in-memory body may already have been restored;
+                // spawning again would hit the profile cap or create a second
+                // controller for the same companion.  Match the persisted
+                // identity case-insensitively, just like CompanionStore.
+                boolean alreadyActive = getCompanionsByOwner(player.getUUID()).stream()
+                        .anyMatch(active -> active.companion.companionName()
+                                .equalsIgnoreCase(saved.companionName()));
+                if (alreadyActive) {
+                    continue;
+                }
                 // Found a saved companion - restore it
                 System.out.println("[MineAgent] Restoring companion '"
                         + saved.companionName() + "' for " + player.getName().getString());

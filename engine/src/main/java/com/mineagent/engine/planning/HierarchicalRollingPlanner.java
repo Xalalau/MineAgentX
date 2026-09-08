@@ -261,7 +261,24 @@ public final class HierarchicalRollingPlanner {
     }
 
     public synchronized void importState(State state) {
-        if (state == null) return;
+        if (state == null) {
+            // A memory reset must also drop the in-memory rolling-plan cursor;
+            // otherwise deleting rolling_plan.json appears to work until the
+            // next prompt resurrects the previous strategic goal.
+            strategicGoal = "";
+            goalEpoch = 0L;
+            observedPlanRevision = 0L;
+            observedWorldRevision = 0L;
+            consecutiveFailures = 0;
+            revision++;
+            taskActive = false;
+            activeTaskId = null;
+            activeTaskName = null;
+            lastProgressVersion = Long.MIN_VALUE;
+            lastBlockedReason = null;
+            lastSignalSignature = "";
+            return;
+        }
         strategicGoal = normalize(state.strategicGoal(), "");
         goalEpoch = Math.max(0L, state.goalEpoch());
         observedPlanRevision = Math.max(0L, state.observedPlanRevision());

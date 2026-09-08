@@ -35,6 +35,8 @@ public final class TeamBlackboard {
                                  String priority, String target,
                                  long gameTick) {}
 
+    public record ClaimResult(boolean accepted, String reason) {}
+
     private static final long REPORT_TTL_TICKS = 200L;
     private static final long REQUEST_TTL_TICKS = 1_200L;
     private static final ConcurrentHashMap<UUID, GroupState> GROUPS =
@@ -90,6 +92,34 @@ public final class TeamBlackboard {
                     "manual:" + companionId, normalize(objective, "team objective"),
                     normalize(role, "flex"), blankToNull(target), "team_plan",
                     TaskState.RUNNING, Math.max(0L, gameTick)));
+        }
+    }
+
+    /** Claim an objective only when no live teammate already owns it. */
+    public static ClaimResult tryCommit(UUID ownerId, UUID companionId,
+                                        String objective, String role, String target,
+                                        long gameTick) {
+        if (ownerId == null || companionId == null) {
+            return new ClaimResult(false, "Missing owner or companion identity");
+        }
+        GroupState group = GROUPS.computeIfAbsent(ownerId, ignored -> new GroupState());
+        synchronized (group) {
+            expire(group, gameTick);
+            String requested = canonical(objective);
+            for (Commitment existing : group.commitments.values()) {
+                if (!existing.companionId().equals(companionId)
+                        && canonical(existing.objective()).equals(requested)
+                        && (existing.state() == TaskState.RUNNING
+                        || existing.state() == TaskState.PAUSED)) {
+                    return new ClaimResult(false, "Objective is already claimed by "
+                            + shortId(existing.companionId()));
+                }
+            }
+            group.commitments.put(companionId, new Commitment(companionId,
+                    "manual:" + companionId, normalize(objective, "team objective"),
+                    normalize(role, "flex"), blankToNull(target), "team_plan",
+                    TaskState.RUNNING, Math.max(0L, gameTick)));
+            return new ClaimResult(true, "Objective claimed");
         }
     }
 
@@ -189,9 +219,10 @@ public final class TeamBlackboard {
                 age(gameTick, entry.getValue().gameTick()) > REPORT_TTL_TICKS);
         group.requests.entrySet().removeIf(entry ->
                 age(gameTick, entry.getValue().gameTick()) > REQUEST_TTL_TICKS);
-        // Executor commitments are removed by task completion. Manual plans
-        // are kept while the companion remains active and must be cleared or
-        // replaced explicitly, matching a teammate's real commitment.
+        // Manual claims have a lease as well: after a crash or a lost worker,
+        // another companion must eventually be able to take the objective.
+        group.commitments.entrySet().removeIf(entry ->
+                age(gameTick, entry.getValue().gameTick()) > REQUEST_TTL_TICKS);
     }
 
     private static long age(long now, long observed) {

@@ -181,6 +181,23 @@ final class PlanGraphTest {
         assertEquals(8L, graph.exportState().revision());
     }
 
+    @Test void nullImportClearsPlanAndAcceptanceState() {
+        PlanGraph graph = new PlanGraph();
+        graph.replacePlan("persisted goal", List.of(draft("step", List.of())), List.of(),
+                List.of(new PlanGraph.GoalCondition("inventory:item", "count", "1",
+                        PlanGraph.Comparison.AT_LEAST, 0.9)));
+        graph.bindToolCall("call");
+        graph.recordToolOutcome("call", "craft", true, "verified", 2L);
+
+        graph.importState(null);
+
+        assertEquals("", graph.exportState().goal());
+        assertEquals(List.of(), graph.exportState().nodes());
+        assertEquals(PlanGraph.GoalStatus.UNPLANNED, graph.goalStatus());
+        assertEquals(List.of(), graph.goalConditions());
+        assertFalse(graph.hasActivePlan());
+    }
+
     private static PlanGraph.DraftNode draft(String id, List<String> dependencies) {
         return new PlanGraph.DraftNode(id, id, "executor verifies " + id,
                 "medium", dependencies, PlanGraph.NodeStatus.PENDING);

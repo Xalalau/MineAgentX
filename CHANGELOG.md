@@ -2,6 +2,35 @@
 
 All notable changes to MineAgent will be documented in this file. The project follows [Semantic Versioning](https://semver.org/) where practical during its alpha stage.
 
+## [0.4.0] - 2026-09-09
+
+### Added
+
+- Add the `aws-bedrock` / `bedrock` Runtime Converse provider with SigV4 signing, tool-use translation, usage normalization, session-token support, and explicit bearer/API-key relay mode.
+- Add native adapters for Azure OpenAI, Vertex AI OAuth/service accounts, Cohere v2, AI21 Jamba, Baidu Qianfan OAuth, Tencent Hunyuan TC3, ByteDance Ark, and Ollama `/api/chat`.
+- Add a profile-based Bedrock `InvokeModel` adapter for Anthropic, Nova, Mistral, Llama, Cohere, and Titan request/response bodies; unsupported private profiles fail explicitly instead of sending guessed JSON.
+- Add deterministic SigV4, Converse request/response, credential validation, and relay mock coverage.
+
+### Changed
+
+- Advertise the provider-neutral `CONVERSE` capability so AgentLoop can distinguish Bedrock from Chat Completions.
+- Normalize native tool-call arguments structurally (object and JSON-string variants) and preserve provider-specific authentication, endpoint routing, and timeout semantics.
+
+### Provider compatibility
+
+- Add evidence-first action transactions, exactly-once tool callback handling, layered relevance-gated memory, cognitive-state projection recovery, and restart-safe ephemeral reservation semantics.
+- Add Responses transport state isolation with persisted opaque reasoning/compaction items, stable prompt-cache affinity, incremental history, and token/cache telemetry.
+- Add bounded path execution safeguards for clearance, bridging, pillar movement, progressive mining, and failure-driven replanning.
+- Preserve Vanilla creative semantics for build, bridge, and pillar actions by using a temporary verified BlockItem when no carried stack exists, then restoring the original selected stack; survival and adventure remain inventory- and permission-bound.
+
+### Fixed
+
+- Prevent synchronous actions from being verified by unrelated semantic revisions or free-form result text.
+- Prevent invalid melee/ranged requests from being reported as successful merely because their target is absent on the next tick.
+- Prevent shared/exclusive resource reservations from bypassing one another and prevent stale reservations from blocking a fresh process after restart.
+- Prevent unrelated high-confidence memories from entering a task prompt solely because of their confidence score.
+- Prevent a live-loop memory reset error from escaping as a server-tick exception after durable files have already been removed.
+
 ## [0.3.6] - 2026-08-10
 
 ### Added

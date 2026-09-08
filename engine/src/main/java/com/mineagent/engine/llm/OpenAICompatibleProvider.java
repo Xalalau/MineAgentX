@@ -3,6 +3,8 @@ package com.mineagent.engine.llm;
 import com.google.gson.*;
 import com.mineagent.api.llm.ChatMessage;
 import com.mineagent.api.llm.LLMResponse;
+import com.mineagent.api.llm.LLMCapabilities;
+import com.mineagent.api.llm.LLMRequest;
 import com.mineagent.api.llm.provider.LLMProvider;
 import com.mineagent.api.llm.provider.LLMProviderException;
 
@@ -32,7 +34,7 @@ public class OpenAICompatibleProvider implements LLMProvider {
     private final List<String> defaultModels;
     private final Set<String> modelPrefixes;
 
-    private OpenAICompatibleProvider(String providerId, String displayName,
+    protected OpenAICompatibleProvider(String providerId, String displayName,
                                      String defaultBaseUrl, List<String> defaultModels,
                                      Set<String> modelPrefixes) {
         this.providerId = providerId;
@@ -44,6 +46,18 @@ public class OpenAICompatibleProvider implements LLMProvider {
 
     @Override
     public String providerId() { return providerId; }
+
+    @Override
+    public LLMCapabilities capabilities() {
+        java.util.EnumSet<LLMCapabilities.Feature> features = java.util.EnumSet.of(
+                LLMCapabilities.Feature.CHAT_COMPLETIONS,
+                LLMCapabilities.Feature.FUNCTION_CALLING,
+                LLMCapabilities.Feature.STREAMING);
+        if ("openai".equals(providerId)) {
+            features.add(LLMCapabilities.Feature.PROMPT_CACHE_KEY);
+        }
+        return new LLMCapabilities(features, 0, 0);
+    }
 
     @Override
     public String displayName() { return displayName; }
@@ -75,7 +89,8 @@ public class OpenAICompatibleProvider implements LLMProvider {
         String resolvedBaseUrl = ProviderSupport.validatedBaseUrl(
                 baseUrl, defaultBaseUrl, providerId);
         try {
-            JsonObject body = buildRequestBody(model, messages, tools, temperature, maxTokens, false);
+            JsonObject body = buildRequestBody(model, messages, tools, temperature, maxTokens,
+                    false, null);
             // Inject thinking effort parameters per provider/model spec.
             // Per official docs as of 2026-08:
             //   - When reasoningEffort is null/blank, NO parameter is injected
@@ -84,8 +99,7 @@ public class OpenAICompatibleProvider implements LLMProvider {
             //     (GPT-4o, GPT-4.1, DeepSeek V3, Grok 4.0, etc.), the field
             //     is silently ignored.
             injectThinkingEffort(body, model, reasoningEffort);
-            String url = ProviderSupport.endpoint(
-                    resolvedBaseUrl, "/v1/chat/completions");
+            String url = chatEndpoint(resolvedBaseUrl, model);
 
             HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
                     .uri(URI.create(url))
@@ -95,9 +109,7 @@ public class OpenAICompatibleProvider implements LLMProvider {
             // Local OpenAI-compatible servers commonly run without auth. Do
             // not emit an empty Bearer header; hosted vendor aliases still
             // reject a missing key during spawn validation.
-            if (apiKey != null && !apiKey.isBlank()) {
-                requestBuilder.header("Authorization", "Bearer " + apiKey);
-            }
+            addAuthentication(requestBuilder, apiKey);
             HttpRequest request = requestBuilder.build();
 
             HttpResponse<String> response = HTTP_CLIENT.send(request,
@@ -131,6 +143,56 @@ public class OpenAICompatibleProvider implements LLMProvider {
         }
     }
 
+    @Override
+    public LLMResponse complete(LLMRequest request) {
+        // The legacy method remains the compatibility path.  This overload
+        // carries a stable per-companion cache key and a request deadline while
+        // preserving every relay-specific parameter mapping below.
+        ProviderSupport.validateRequest(providerId, request.apiKey(), request.model(),
+                request.messages(), request.temperature(), request.maxTokens(), false);
+        String resolvedBaseUrl = ProviderSupport.validatedBaseUrl(
+                request.baseUrl(), defaultBaseUrl, providerId);
+        try {
+            JsonObject body = buildRequestBody(request.model(), request.messages(), request.tools(),
+                    request.temperature(), request.maxTokens(), false, request.promptCacheKey());
+            injectThinkingEffort(body, request.model(), request.reasoningEffort());
+            HttpRequest.Builder builder = HttpRequest.newBuilder()
+                    .uri(URI.create(chatEndpoint(resolvedBaseUrl, request.model())))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(body)))
+                    .timeout(request.deadline());
+            addAuthentication(builder, request.apiKey());
+            HttpResponse<String> response = HTTP_CLIENT.send(builder.build(),
+                    HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw LLMProviderException.http(providerId, response.statusCode(), response.body(),
+                        response.headers().firstValue("Retry-After").orElse(null));
+            }
+            try {
+                return parseResponse(response.body());
+            } catch (RuntimeException malformed) {
+                throw ProviderSupport.malformedResponse(providerId, response.body(), malformed);
+            }
+        } catch (LLMProviderException failure) {
+            throw failure;
+        } catch (java.io.IOException | InterruptedException failure) {
+            if (failure instanceof InterruptedException) Thread.currentThread().interrupt();
+            throw LLMProviderException.transport(providerId, failure);
+        }
+    }
+
+    /** Endpoint hook for hosted OpenAI-compatible variants such as Azure and Ark. */
+    protected String chatEndpoint(String resolvedBaseUrl, String model) {
+        return ProviderSupport.endpoint(resolvedBaseUrl, "/v1/chat/completions");
+    }
+
+    /** Authentication hook; the default is the OpenAI Bearer convention. */
+    protected void addAuthentication(HttpRequest.Builder builder, String apiKey) {
+        if (apiKey != null && !apiKey.isBlank()) {
+            builder.header("Authorization", "Bearer " + apiKey);
+        }
+    }
+
     // ── Thinking effort injection ────────────────────────────────
 
     /**
@@ -144,7 +206,7 @@ public class OpenAICompatibleProvider implements LLMProvider {
      *       silently skip injection</li>
      * </ul>
      */
-    private void injectThinkingEffort(JsonObject body, String model, String effort) {
+    protected void injectThinkingEffort(JsonObject body, String model, String effort) {
         if (effort == null || effort.isBlank()) return;
         if (model == null || model.isBlank()) return;
         String e = effort.toLowerCase();
@@ -486,10 +548,10 @@ public class OpenAICompatibleProvider implements LLMProvider {
 
     // ── Request building ───────────────────────────────────────────
 
-    private JsonObject buildRequestBody(String model, List<ChatMessage> messages,
+    protected JsonObject buildRequestBody(String model, List<ChatMessage> messages,
                                          List<Map<String, Object>> tools,
                                          double temperature, int maxTokens,
-                                         boolean stream) {
+                                         boolean stream, String requestedCacheKey) {
         JsonObject body = new JsonObject();
         body.addProperty("model", model);
 
@@ -595,7 +657,9 @@ public class OpenAICompatibleProvider implements LLMProvider {
         // chat-completions schema. Strict DeepSeek/Qwen/GLM relays reject
         // unknown fields with 400, so only send it to the OpenAI provider.
         if ("openai".equals(providerId)) {
-            body.addProperty("prompt_cache_key", providerId + ":" + model);
+            String cacheKey = requestedCacheKey == null || requestedCacheKey.isBlank()
+                    ? providerId + ":" + model : requestedCacheKey;
+            body.addProperty("prompt_cache_key", cacheKey);
         }
 
         return body;
@@ -642,7 +706,7 @@ public class OpenAICompatibleProvider implements LLMProvider {
 
     // ── Response parsing ───────────────────────────────────────────
 
-    private LLMResponse parseResponse(String json) {
+    protected LLMResponse parseResponse(String json) {
         // Robust JSON extraction: some relays prepend BOM, whitespace, or
         // status text before the JSON body. Find the first '{' and try to
         // parse from there. If the whole thing fails, try extracting a

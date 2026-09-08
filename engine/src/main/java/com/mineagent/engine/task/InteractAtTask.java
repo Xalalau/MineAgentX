@@ -52,6 +52,27 @@ public class InteractAtTask extends CompanionTask<InteractAtTool.InteractAtTaskR
     }
 
     @Override
+    protected void onResume() {
+        // A progressive attack can finish in FakePlayerGameMode.tick() after
+        // the task was preempted but before onInterrupt observes the air
+        // postcondition. Recheck the target before rebuilding navigation so a
+        // verified break is not retried or reported as a navigation failure.
+        if (record != null && "attack".equals(record.button)) {
+            var sp = TaskContext.serverPlayer(player);
+            BlockPos target = new BlockPos(record.x, record.y, record.z);
+            if (sp.level().getBlockState(target).isAir()) {
+                phase = Phase.DONE;
+                interactTicks = 0;
+                breakStarted = false;
+                failReason = null;
+                invalidateWorldAsset(target);
+                return;
+            }
+        }
+        onStart();
+    }
+
+    @Override
     protected TaskState onTick() {
         long now = TaskContext.serverPlayer(player).level().getGameTime();
         if (record.deadline() > 0L && now >= record.deadline()) {

@@ -50,6 +50,17 @@ final class TeamBlackboardTest {
                 .contains("objective=build wall"));
     }
 
+    @Test void pausedClaimStillBlocksDuplicateObjective() {
+        UUID owner = UUID.randomUUID();
+        UUID first = UUID.randomUUID();
+        UUID second = UUID.randomUUID();
+        TeamBlackboard.updateTask(owner, first, "t1", "escort owner",
+                TaskState.PAUSED, null, 30L);
+        TeamBlackboard.ClaimResult result = TeamBlackboard.tryCommit(
+                owner, second, "escort owner", "support", null, 31L);
+        assertFalse(result.accepted());
+    }
+
     private static SituationSnapshot snapshot(long tick) {
         return new SituationSnapshot(tick,
                 new SituationSnapshot.Position("minecraft:overworld", 0, 64, 0),

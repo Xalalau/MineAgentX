@@ -11,8 +11,19 @@ public record LLMResponse(
     String model,
     Choice choice,
     Usage usage,
-    String finishReason
+    String finishReason,
+    List<ConversationItem> outputItems
 ) {
+
+    /** Source-compatible constructor for providers without opaque output items. */
+    public LLMResponse(String id, String model, Choice choice, Usage usage,
+                       String finishReason) {
+        this(id, model, choice, usage, finishReason, List.of());
+    }
+
+    public LLMResponse {
+        outputItems = outputItems == null ? List.of() : List.copyOf(outputItems);
+    }
 
     /** A single choice in the response. */
     public record Choice(int index, ChatMessage message, String finishReason) {}

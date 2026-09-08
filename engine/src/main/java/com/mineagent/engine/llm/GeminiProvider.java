@@ -3,6 +3,7 @@ package com.mineagent.engine.llm;
 import com.google.gson.*;
 import com.mineagent.api.llm.ChatMessage;
 import com.mineagent.api.llm.LLMResponse;
+import com.mineagent.api.llm.LLMCapabilities;
 import com.mineagent.api.llm.provider.LLMProvider;
 import com.mineagent.api.llm.provider.LLMProviderException;
 
@@ -27,6 +28,14 @@ public class GeminiProvider implements LLMProvider {
 
     @Override
     public String providerId() { return "gemini"; }
+
+    @Override
+    public LLMCapabilities capabilities() {
+        return new LLMCapabilities(java.util.EnumSet.of(
+                LLMCapabilities.Feature.CHAT_COMPLETIONS,
+                LLMCapabilities.Feature.FUNCTION_CALLING,
+                LLMCapabilities.Feature.STREAMING), 0, 0);
+    }
 
     @Override
     public String displayName() { return "Google Gemini"; }
@@ -67,6 +76,23 @@ public class GeminiProvider implements LLMProvider {
                                  List<Map<String, Object>> tools,
                                  double temperature, int maxTokens,
                                  String reasoningEffort) {
+        return completeInternal(baseUrl, apiKey, model, messages, tools,
+                temperature, maxTokens, reasoningEffort, Duration.ofSeconds(120));
+    }
+
+    @Override
+    public LLMResponse complete(com.mineagent.api.llm.LLMRequest request) {
+        if (request == null) throw new IllegalArgumentException("Gemini request is null");
+        return completeInternal(request.baseUrl(), request.apiKey(), request.model(),
+                request.messages(), request.tools(), request.temperature(),
+                request.maxTokens(), request.reasoningEffort(), request.deadline());
+    }
+
+    private LLMResponse completeInternal(String baseUrl, String apiKey, String model,
+                                          List<ChatMessage> messages,
+                                          List<Map<String, Object>> tools,
+                                          double temperature, int maxTokens,
+                                          String reasoningEffort, Duration timeout) {
         // Fail fast on null/blank model — otherwise model.startsWith() below
         // would throw NPE, masking the real configuration issue.
         ProviderSupport.validateRequest(
@@ -317,8 +343,13 @@ public class GeminiProvider implements LLMProvider {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
                     .header("Content-Type", "application/json")
+                    // Google accepts x-goog-api-key as the header form. Keep
+                    // the query parameter above for older Gemini relays that
+                    // only implement the documented URL form; the header also
+                    // lets official gateways avoid relying on URL logging.
+                    .header("x-goog-api-key", apiKey)
                     .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(body)))
-                    .timeout(Duration.ofSeconds(120))
+                    .timeout(effectiveTimeout(timeout))
                     .build();
 
             HttpResponse<String> response = HTTP_CLIENT.send(request,
@@ -347,6 +378,14 @@ public class GeminiProvider implements LLMProvider {
         } catch (RuntimeException e) {
             throw e;
         }
+    }
+
+    private static Duration effectiveTimeout(Duration timeout) {
+        if (timeout == null || timeout.isNegative() || timeout.isZero()) {
+            return Duration.ofSeconds(30);
+        }
+        return timeout.compareTo(Duration.ofMinutes(10)) > 0
+                ? Duration.ofMinutes(10) : timeout;
     }
 
     private String translateRole(String role) {

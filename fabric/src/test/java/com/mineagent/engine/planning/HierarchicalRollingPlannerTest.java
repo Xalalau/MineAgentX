@@ -79,4 +79,20 @@ final class HierarchicalRollingPlannerTest {
         assertNull(planner.tick(6L));
         assertEquals(0, planner.exportState().consecutiveFailures());
     }
+
+    @Test void nullImportClearsStrategicGoalAndRuntimeOwnership() {
+        PlanGraph graph = new PlanGraph();
+        graph.replacePlan("persisted goal", List.of(new PlanGraph.DraftNode(
+                "step", "step", "done", "high", List.of(),
+                PlanGraph.NodeStatus.PENDING)), List.of());
+        HierarchicalRollingPlanner planner = new HierarchicalRollingPlanner(
+                graph, new SemanticWorldModel());
+        planner.onPlanReplaced("persisted goal", 1L);
+        planner.onTaskAccepted("task", "goto", TaskSnapshot.running("moving", "moving"), 2L);
+
+        planner.importState(null);
+
+        assertEquals("", planner.exportState().strategicGoal());
+        assertTrue(planner.summarizeForPrompt().contains("idle"));
+    }
 }

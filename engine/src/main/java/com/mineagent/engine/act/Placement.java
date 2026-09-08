@@ -12,6 +12,7 @@ import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.level.material.Fluids;
@@ -96,14 +97,40 @@ public final class Placement {
 
             Block block = state.getBlock();
             int inventorySlot = findBlockInventorySlot(player, block);
-            if (inventorySlot < 0) return false;
-            InteractionHand placementHand = prepareBlockInHand(player, inventorySlot);
+            if (inventorySlot >= 0) {
+                InteractionHand placementHand = prepareBlockInHand(player, inventorySlot);
 
-            // Path scaffolding must obey the same BlockItem/useItemOn contract
-            // as ordinary building. Direct setBlock hid invalid faces, skipped
-            // mod hooks and produced no authentic client placement sequence.
-            Attempt attempt = placeHeldBlock(player, pos, placementHand);
-            return attempt.placed() && level.getBlockState(pos).is(block);
+                // Path scaffolding must obey the same BlockItem/useItemOn
+                // contract as ordinary building. Direct setBlock hid invalid
+                // faces, skipped mod hooks and produced no authentic client
+                // placement sequence.
+                Attempt attempt = placeHeldBlock(player, pos, placementHand);
+                return attempt.placed() && level.getBlockState(pos).is(block);
+            }
+
+            // Creative mode has an infinite block supply by definition. The
+            // action still goes through vanilla useItemOn, but a temporary
+            // BlockItem is needed when the selected inventory is empty. The
+            // exact previous stack is restored in finally so this branch
+            // cannot silently replace the fake player's selected item.
+            if (!player.isCreative() || !(block.asItem() instanceof BlockItem)) return false;
+            var inventory = player.getInventory();
+            int selected = Math.max(0, Math.min(8, inventory.selected));
+            ItemStack previous = inventory.getItem(selected);
+            inventory.setItem(selected, new ItemStack(block.asItem()));
+            inventory.setChanged();
+            player.inventoryMenu.broadcastChanges();
+            try {
+                Attempt attempt = placeHeldBlock(player, pos, InteractionHand.MAIN_HAND);
+                return attempt.placed() && level.getBlockState(pos).is(block);
+            } finally {
+                inventory.setItem(selected, previous);
+                inventory.setChanged();
+                player.inventoryMenu.broadcastChanges();
+                if (player.containerMenu != player.inventoryMenu) {
+                    player.containerMenu.broadcastChanges();
+                }
+            }
         } catch (Exception e) {
             System.err.println("[MineAgent] Placement.placeBlock error: " + e.getMessage());
             return false;
@@ -126,6 +153,15 @@ public final class Placement {
             BlockState state = block.defaultBlockState();
             if (!isSafeSupportMaterial(block, state)) continue;
             if (placeBlock(player, pos, state)) return true;
+        }
+        // In creative mode the absence of a carried support stack must not
+        // make bridging and pillar movement impossible. A stable vanilla
+        // cobblestone support is injected only for this one useItemOn call;
+        // survival/adventure still require a real inventory item above.
+        if (player.isCreative()) {
+            BlockState fallback = Blocks.COBBLESTONE.defaultBlockState();
+            if (isSafeSupportMaterial(fallback.getBlock(), fallback)
+                    && placeBlock(player, pos, fallback)) return true;
         }
         return false;
     }

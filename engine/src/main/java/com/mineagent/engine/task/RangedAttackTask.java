@@ -46,6 +46,8 @@ public class RangedAttackTask
     private int repathTicks;
     private String failReason;
     private double effectiveRange;
+    /** True only after target, weapon, ammo and navigation were accepted. */
+    private boolean startedSuccessfully;
 
     public RangedAttackTask(AgentPlayer player,
                             RangedAttackTool.RangedAttackTaskRecord record) {
@@ -60,6 +62,7 @@ public class RangedAttackTask
         shotsFired = 0;
         repathTicks = 0;
         failReason = null;
+        startedSuccessfully = false;
 
         ServerPlayer sp = TaskContext.serverPlayer(player);
         ServerLevel level = sp.serverLevel();
@@ -103,11 +106,23 @@ public class RangedAttackTask
             }
         });
         navigateToRange();
+        startedSuccessfully = true;
     }
 
     @Override
     protected void onResume() {
         int verifiedShots = shotsFired;
+        // Preserve a kill that occurred just before survival preemption.
+        // Re-resolving a dead entity through onStart() would convert a
+        // completed ranged objective into a "target not found" failure.
+        if (target != null && !target.isAlive()) {
+            shotsFired = verifiedShots;
+            phase = Phase.DONE;
+            failReason = null;
+            startedSuccessfully = true;
+            cleanup();
+            return;
+        }
         onStart();
         shotsFired = verifiedShots;
     }
@@ -115,12 +130,21 @@ public class RangedAttackTask
     @Override
     protected TaskState onTick() {
         ServerPlayer sp = TaskContext.serverPlayer(player);
-        if (sp.level().getGameTime() >= record.deadline()) {
+        if (record.deadline() > 0L && sp.level().getGameTime() >= record.deadline()) {
             cleanup();
             return TaskState.FAILED;
         }
         if (!player.isAlive()) fail("Companion died");
         else if (player.health() < MIN_HEALTH) fail("Companion health critical, retreating");
+
+        // Do not turn an invalid request (missing target, weapon or ammo) into
+        // a false success merely because the target lookup is empty on the
+        // next tick. Target disappearance is a success postcondition only
+        // after the task has passed all start-time validation.
+        if (!startedSuccessfully) {
+            cleanup();
+            return TaskState.FAILED;
+        }
 
         if (target == null || !target.isAlive()) {
             cleanup();
@@ -287,7 +311,13 @@ public class RangedAttackTask
     }
 
     private boolean isInFiringRange(double distance) {
-        return distance >= 4.0 && distance <= effectiveRange;
+        // GoalNear expresses a disk (distance <= radius), not an annulus.
+        // Requiring four blocks here therefore caused a point-blank target to
+        // be reported as "near" by navigation, immediately re-planned, and
+        // looped forever without ever reaching AIM. Vanilla ranged weapons
+        // remain usable at point blank, so only reject coincident entity
+        // positions where aiming has no stable direction.
+        return Double.isFinite(distance) && distance >= 0.5 && distance <= effectiveRange;
     }
 
     private boolean hasClearShot() {

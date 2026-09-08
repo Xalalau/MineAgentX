@@ -6,6 +6,7 @@ import com.mineagent.api.task.*;
 import com.mineagent.engine.MineAgentEngine;
 import com.mineagent.engine.entity.CompanionEntity;
 import com.mineagent.engine.loop.AgentLoop;
+import com.mineagent.engine.cognition.TeamBlackboard;
 
 import java.util.*;
 
@@ -120,6 +121,10 @@ public class CompanionLifecycleHandler implements CompanionLifecycle {
         // retained but cannot generate tools that would unexpectedly execute
         // after the body is revived.
         loop.pause();
+        // A dead body cannot satisfy a live team lease. Release manual/team
+        // commitments immediately; otherwise siblings would avoid the task
+        // until the blackboard's normal 1,200-tick expiry window.
+        TeamBlackboard.clearCommitment(companion.ownerUuid(), companion.companionId());
 
         boolean hardcore = companion instanceof CompanionEntity entity
                 && (entity.gameMode().isHardcore() || entity.hardcoreDeathLocked());
