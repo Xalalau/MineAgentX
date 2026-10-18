@@ -35,7 +35,7 @@
 
 ## Work in progress
 
-- User requested a maintained project guide: `agents.md` now maps source files, design intent, supported local protocols, validation, Git ownership, and parallel-agent coordination. Read it on resume and include it in future delegation context; update it in the same change when the project structure or supported behavior changes.
+- User requested a maintained project guide: `AGENTS.md` now maps source files, design intent, supported local protocols, validation, Git ownership, and parallel-agent coordination. Read it on resume and include it in future delegation context; update it in the same change when the project structure or supported behavior changes.
 
 - Documentation now includes the complete 40-tool catalog in `CAPABILITIES.md`, with the preceding checkpoint rendered in English and a local-only section 6. English README replaces the duplicated language-specific READMEs. Contribution guidance and GitHub-specific templates/automation were subsequently removed at the user's request; local Gradle and repository-check commands remain available. The standalone security policy was removed at the user's request, along with its links, in local commit `ee235ac`.
 - `scripts/check_project.py` was exercised RED: missing capabilities and Chinese text were detected. Its tool-catalog coverage check now passes.
