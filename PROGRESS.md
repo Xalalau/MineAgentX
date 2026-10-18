@@ -21,6 +21,8 @@
 
 ## Work in progress
 
+- User requested a maintained project guide: `agents.md` now maps source files, design intent, supported local protocols, validation, Git ownership, and parallel-agent coordination. Read it on resume and include it in future delegation context; update it in the same change when the project structure or supported behavior changes.
+
 - Documentation now includes the complete 40-tool catalog in `CAPABILITIES.md`, with the preceding checkpoint rendered in English and a local-only section 6. English README replaces the duplicated language-specific READMEs; contribution/security/issue documentation is aligned with the fork.
 - `scripts/check_project.py` was exercised RED: missing capabilities and Chinese text were detected. Its tool-catalog coverage check now passes.
 - Verified Temurin JDK 21 archive checksum `ce79869e1307ed8ee1e2baa86a412b1eb5b75d10a01006d788a6f968bcfaee94`; local JAVA_HOME is `.tools/jdk-21.0.12.1+1` (ignored). Gradle 8.10.2 wrapper executed successfully with that JDK.

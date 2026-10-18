@@ -60,6 +60,8 @@ Chat and world context are sent to the configured local inference service. Runti
 
 ## Development status
 
+Read [agents.md](agents.md) for the source map, design decisions, verification rules, and parallel-agent workflow. Keep it current whenever the structure or supported behavior changes.
+
 See [PROGRESS.md](PROGRESS.md) for the current preparation state and actual verification evidence. The construction design/preview/revision environment and additional configurable language layers are future work, not existing capabilities.
 
 ## License and attribution
