@@ -17,11 +17,11 @@ The following is an English rendering of the assistant's last checkpoint before 
 
 This inventory expands the capability list from the source review of original MineAgent revision `701250a950154667212d3ae1be3b3197e9ce9470`, updated for this fork's NeoForge-only, local-inference-only scope. The checkout is now named `MineAgentX`; the Git remote is `https://github.com/Xalalau/MineAgentX.git`.
 
-Source implementation is not proof of reliable performance in a live world. Completion depends on the selected model, available resources, permissions, pathfinding, and the installed modpack. See `PROGRESS.md` for actual validation results. Documentation is in English; other localizations are future work.
+Source implementation is not proof of reliable performance in a live world. Completion depends on the selected model, available resources, permissions, pathfinding, and the installed modpack. See `PROGRESS.md` for actual validation results. Documentation is in English. Configurable EN/PT-BR runtime support is under integration; complete legacy-producer coverage is not yet verified.
 
 ## 1. Actions available to the AI
 
-The built-in registry contains **40 tools**. Specialized tools can be exposed on demand rather than sending all schemas in every request.
+The built-in registry contains **43 tools**. Specialized tools can be exposed on demand rather than sending all schemas in every request.
 
 ### Perception and location
 
@@ -47,6 +47,8 @@ Perception is structured server data, not screenshots delivered to a vision mode
 | `goto` | Navigate to horizontal coordinates, an exact position, an altitude, or a block's neighboring position. Pathfinding can dig, bridge, climb pillars, and use supported movement maneuvers subject to policy and resources. |
 | `auto_mine` | Find and mine a requested block type and quantity, navigating to targets and collecting drops where reachable. |
 | `build` | Place or clear a sequence of block coordinates. Each request uses one block type and accepts at most 512 positions. |
+| `construction` | Create and revise persisted coordinate designs, assess candidate sites, inspect material/effort estimates, and generate six orthographic PNG views. |
+| `execute_construction` | Execute a design revision through physical `build` tasks in bounded batches and reconcile observed block outcomes. Task admission alone is not completion. |
 | `interact_at` | Use or attack a block, or use the offhand, optionally selecting an item and interaction duration. |
 | `interact_entity` | Use or attack an entity, including offhand use. |
 | `melee_attack` | Approach a target and attack repeatedly with the equipped weapon until a terminal outcome or cancellation. |
@@ -54,7 +56,7 @@ Perception is structured server data, not screenshots delivered to a vision mode
 
 Construction navigates to valid placement positions, checks reach and line of sight, uses the Minecraft item-on-block interaction, and verifies resulting block state. It is not arbitrary long-distance world editing. Creative construction may use temporary block items; Survival and Adventure remain constrained by inventory and permissions.
 
-The desired separate design/preview/revision sandbox is **not implemented**. Coordinate-based execution and world inspection are existing primitives on which it could be built.
+The versioned design/preview/revision subsystem is implemented and registered, with standalone regression coverage. Previews are colored voxels rather than Minecraft textures or special block geometry. Automatic terminal-event reconciliation and optional local visual-model review still require final integration; no live construction or visual inference is claimed. Projects currently use owner + exact companion name for storage; renaming requires a storage migration.
 
 ### Inventory and item use
 
@@ -63,7 +65,7 @@ The desired separate design/preview/revision sandbox is **not implemented**. Coo
 | `equip_item` | Equip armor, offhand, and hotbar slots, swapping existing contents back to the source slot. |
 | `eat_item` | Eat a requested food or select an available safe food, respecting use duration and interruption. |
 | `drop_items` | Drop an item quantity at the companion's current location. |
-| `collect_items` | Walk to and collect dropped items, with optional item filtering. |
+| `collect_items` | Physically navigate to eligible dropped items, optionally filtering by item. Count only corroborated scoped pickup receipts; refuse oversized targets without splitting away entity metadata. Exhausted partial delivery is reported as incomplete, not success. |
 | `transfer_items` | Move items between player slots or between inventory and the currently open container. |
 | `use_item` | Use an item without targeting a block/entity: throw, eat, drink, or hold and release, with optional 3D aim and either hand. |
 | `inspect_gui` | Read slots of the currently open container menu. |
@@ -71,12 +73,14 @@ The desired separate design/preview/revision sandbox is **not implemented**. Coo
 
 These primitives allow workflows such as opening a furnace, inserting fuel and input, waiting for processing, and collecting output. They do not guarantee support for every custom menu action or private mod API.
 
+Collection reports observed/requested/remaining quantities in EN/PT-BR. A scoped pickup Post event for the exact player/entity must agree with immediate inventory gain for the same item/components; unrelated grants and entity disappearance are not delivery receipts. Oversized partial pickups are refused without replacing the original entity or altering its ownership, age, lifespan, delay or components. Vanilla automatic collision pickup outside the observed touch can still occur, is not attributed to this task, and can exceed the request. This is not a global pickup cap or proof of live protection-mod behavior.
+
 ### Recipes, resources, and planning
 
 | Tool | Capability |
 | --- | --- |
 | `lookup_recipe` | Find registered recipes producing or consuming an exact item ID, including ingredient alternatives. |
-| `craft` | Execute registered crafting recipes with the 2x2 grid or a nearby crafting table for 3x3 recipes. Counts represent recipe batches. |
+| `craft` | Execute registered crafting recipes with the 2x2 grid or a nearby crafting table for 3x3 recipes. Counts represent recipe batches. Each batch requires carried space for its complete output and recipe leftovers before ingredients are consumed; partial results distinguish committed and remaining batches. |
 | `resolve_need` | Search carried items, equipment, inspected storage, observed drops, and known facilities before making or replacing an item. |
 | `plan_acquisition` | Expand an item/count target into a bounded dependency graph accounting for inventory, observed assets, yields, alternatives, and planned surplus. |
 | `todowrite` | Create or repair a long-horizon plan, retaining verified checkpoints and requiring evidence before accepting the final goal. |
@@ -88,6 +92,7 @@ Registered modded recipes can be discovered. Unknown station mechanics remain ex
 | Tool | Capability |
 | --- | --- |
 | `recall_memory` | Retrieve remembered locations and points of interest, including resources, storage, facilities, structures, and hazards. |
+| `identity_memory` | Progressively retrieve recorded evidence, learned preferences, goals and world knowledge, and submit justified, revision-checked updates. Player claims remain distinct from observations. |
 | `explore_mechanism` | Propose, rank, inspect, or abort bounded experiments on unfamiliar blocks, items, menus, recipes, or mod rules. |
 | `load_skill` | Load a built-in instructional skill document into the model's context. |
 | `list_learned_skills` | Retrieve reusable skills learned from verified successful action sequences. |
@@ -134,7 +139,7 @@ These mechanisms reduce latency for immediate reactions but are not guarantees o
 - Investigate unfamiliar mechanisms with bounded budgets, risk assessment, hypotheses, counterexamples, and compensation rules.
 - Require independent evidence before promoting discovered rules into reusable skills; invalidate contradicted or environment-stale rules.
 - Track action transactions and callbacks to avoid duplicate or unsupported success reports.
-- Maintain simulated personality, emotion, feedback, and owner-intent estimates. These inherited features have been translated, not removed in this preparation.
+- Maintain evidence-backed evolving preferences, goals and world knowledge with bounded reflection and persistence. Legacy persona data/accessors remain compatible, but randomly assigned persona and canned idle dialogue no longer drive the decision context. Actual model-driven behavior and cancellation-safe late evidence remain under integration.
 
 ## 4. Multiple companions
 
@@ -162,7 +167,7 @@ Current limitation: the same owner cannot create a second companion using the sa
 - Companion naming, renaming, skins, and default-skin restoration.
 - Status HUD, path debugging, perception overlay, and companion labels.
 - Rebindable keyboard controls: `M` menu, `C` chat, `H` HUD, `P` path debug, `V` perception overlay, and `N` labels.
-- English UI and prompts initially; additional localization layers are future work.
+- English and PT-BR UI resources are available. The server model language is configured independently from the client locale; full legacy runtime coverage and reload consistency remain under integration.
 
 ## 6. Local model connection
 
@@ -229,9 +234,9 @@ All commands use `/mineagent`:
 - Local inference keeps model traffic on the configured local infrastructure. Sensitive chat/world context still reaches that server.
 - Configuration/persistence can contain plaintext credentials if supplied; do not commit actual runtime configuration, keys, private chat, or worlds.
 - Existing server-backed locators expose knowledge beyond a human player's direct observations.
-- Predefined personality/emotion systems still exist; removing or redesigning them is a separate step.
-- The future construction goal is design, visualize, revise until satisfactory, map local design coordinates to the world, and build through the companion's actions. It is not advertised as an existing feature.
-- Configurable language packs beyond the English base, autonomous home/bed decisions, and task-specific gameplay reliability need separate implementation or validation.
+- Legacy personality/emotion classes still exist for compatibility; evidence-backed identity replaces assigned personality in decision context. This is not a claim that every inherited class has been removed.
+- Persistent coordinate designs, six-view previews, world transforms and physical construction dispatch are implemented; live-world behavior, optional visual review and complete lifecycle integration still require verification.
+- Configurable EN/PT-BR is being integrated. Autonomous home/bed decisions and task-specific gameplay reliability still require model/gameplay validation.
 - The mod remains alpha software. Back up worlds and test on a disposable copy before using a valued world.
 
 ### Source anchors
