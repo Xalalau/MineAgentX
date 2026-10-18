@@ -29,6 +29,8 @@
 
 ## Repository simplification
 
+- Preserve the client UI design-system document. Its repository-relative link and read-before-UI-edit guidance are now in `AGENTS.md`; do not remove it as part of documentation cleanup.
+
 - Removed contribution documentation and the entire GitHub configuration directory at the user's request, including issue/PR templates, release notes, and automatic build/release workflows. Updated the agent guide accordingly.
 - Removed the inherited changelog at the user's request. Release history belongs in release notes rather than a separate tracked changelog.
 - Local Gradle builds, regression tests, repository checks, license, and upstream attribution are retained. Removing GitHub automation does not remove the requirement to verify changes locally.

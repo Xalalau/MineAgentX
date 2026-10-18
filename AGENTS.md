@@ -43,6 +43,7 @@ All paths below are relative to this repository unless explicitly labeled extern
 | `api/src/main/java/com/mineagent/api/` | Loader-independent configuration, model/tool/task contracts, companion game modes, payload contracts, platform API. |
 | `engine/src/main/java/com/mineagent/engine/` | Companion runtime and action execution. |
 | `engine/src/client/java/com/mineagent/engine/client/` | Shared client screens, controls, rendering, and UI model/preset code. |
+| [Client UI design system](engine/src/client/java/com/mineagent/engine/client/ui/DESIGN_SYSTEM.md) | Visual hierarchy, colors, layout, and screen responsibilities. Read before changing client UI. Preserve this document; the user explicitly requested keeping it. |
 | `engine/src/client/resources/assets/mineagent/lang/en_us.json` | Base English UI translations. |
 | `tools/src/main/java/com/mineagent/tools/` | AI-callable tool implementations and authoritative registration. |
 | `tools/src/main/resources/skills/` | Instructional knowledge supplied to the model; not automatically executable routines. |
