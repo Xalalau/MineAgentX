@@ -13,10 +13,9 @@ import java.util.Map;
  * A provider for LLM completions. Implementations translate MineAgent's
  * unified messages and tool schemas to one concrete wire protocol.
  *
- * <p>The registry is intentionally open: built-in adapters cover OpenAI Chat
- * Completions, Anthropic Messages, Gemini generateContent, and AWS Bedrock
- * Converse, while another mod can register a provider for a private or future
- * protocol.
+ * <p>The built-in adapters support local OpenAI-compatible and native Ollama
+ * endpoints. The registry remains open for another mod to register an explicit
+ * protocol adapter.
  */
 public interface LLMProvider {
 

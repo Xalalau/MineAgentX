@@ -163,7 +163,22 @@ public class OpenAICompatibleProvider implements LLMProvider {
             msgObj.addProperty("role", msg.role());
 
             // Empty content is valid for assistant tool calls and empty tool results.
-            if ("tool".equals(msg.role())) {
+            if (!msg.images().isEmpty()) {
+                JsonArray content = new JsonArray();
+                JsonObject text = new JsonObject();
+                text.addProperty("type", "text");
+                text.addProperty("text", msg.content() == null ? "" : msg.content());
+                content.add(text);
+                for (String image : msg.images()) {
+                    JsonObject part = new JsonObject();
+                    part.addProperty("type", "image_url");
+                    JsonObject source = new JsonObject();
+                    source.addProperty("url", image);
+                    part.add("image_url", source);
+                    content.add(part);
+                }
+                msgObj.add("content", content);
+            } else if ("tool".equals(msg.role())) {
                 msgObj.addProperty("content",
                         msg.content() != null ? msg.content() : "");
             } else if (msg.content() != null) {

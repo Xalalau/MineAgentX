@@ -13,9 +13,19 @@ The coordinating agent owns shared documentation updates unless explicitly deleg
 - Minecraft **1.21.1**, **NeoForge 21.1.x only**, **Java 21**. No Fabric module, Forge 1.20.1, Architectury migration, or cloud inference.
 - Current codebase derives from `bingdongni/MineAgent` at `701250a950154667212d3ae1be3b3197e9ce9470`. Preserve upstream attribution and the LGPL-3.0-only license.
 - Preserve the `mineagent` mod ID, Java package namespace, save formats, and network contracts unless a separately authorized migration changes them. The displayed project/artifact name is MineAgentX.
-- English is the initial language of documentation, code comments, prompts, UI, and built-in data. Future localization should layer over English through configuration, not introduce duplicated language-specific logic or fixed Portuguese command routing.
+- Source identifiers, comments, and documentation remain English. Runtime language is configurable: `en_us` by default and `pt_br` as the first additional language. Every new model-facing instruction, tool description, observation, result, memory, and player-facing message must support both. Technical identifiers remain stable. Do not implement localization as a fixed natural-language intent parser.
 - Local inference has **two supported options: native Ollama and Bonsai/MTP via an OpenAI-compatible API**. Do not accidentally remove Ollama when removing cloud providers.
 - Favor general, composable actions and verified outcomes over hardcoded task scripts. The AI should decide how to achieve an objective; deterministic execution, permissions, safety checks, cancellation, and truthful result reporting still matter.
+
+## Current development requirements
+
+- Build player-like general intelligence from compact context, discoverable capabilities, lived observations, and reasoned memory rather than predetermined routines. Farming, logistics, shelter, transport, and construction are goals the model composes.
+- Player/companion attacks are denied by default and explicitly configurable by the server; enforce the policy at execution, not only in prompts. Preserve ordinary player permissions, item accounting, reach, visibility, and cancellation. Recovery must not destroy player assets.
+- Construction requires persistent versioned designs, material/effort estimates, candidate-site assessment, explicit terrain-change awareness, six orthographic previews, optional local visual-model review, revisions, world transforms, and physical block execution with observed outcomes.
+- Replace inherited randomly assigned personality/canned dialogue with evidence-backed evolving preferences and periodic bounded reflection. Store reasons and revisions; persuasion can change beliefs without automatically erasing identity.
+- Expose only a small useful entry surface; reveal detailed tools, design records, and memory when relevant. Keep deterministic math/accounting automatic, without extra reasoning calls.
+- Write model instructions as general principles, decision criteria, constraints, and questions to consider. Avoid worked examples, scripted dialogue, sample personalities, prescribed designs, and fixed action sequences: the local model can imitate them instead of reasoning from current evidence. Express required tool syntax concisely through schemas, separate from behavioral guidance. Evaluate decisions across varied situations rather than rewarding imitation of a reference answer.
+- Communication is ordinary conversation: do not require player tags, `@name`, special words, or markup. Model instructions should use natural prose, not a tag-based dialogue protocol. Keep technical IDs internal and distinguish actual speakers, observations, preferences, and goals without turning chat into commands. Likes, goals, and remembered world facts must affect real choices and remain revisable through experience and reasoned conversation.
 
 ## Design preferences: do not silently undo these
 
@@ -64,7 +74,7 @@ All paths below are relative to this repository unless explicitly labeled extern
 - `engine/.../persona/`, `behavior/`, `theory/`: inherited personality, idle behavior, and owner-intent estimation. Do not advertise these as removed.
 - `tools/.../ToolRegistration.java`: authoritative tool catalog. Follow each tool into its executor before claiming a capability works.
 - `api/.../config/MineAgentConfig.java`: defaults and persistence for runtime `config/mineagent.json`.
-- `api/.../llm/LLMRequest.java`, `LLMResponse.java`, `ChatMessage.java`: transport contracts, deadlines, conversation history, tool calls/results.
+- `api/.../llm/LLMRequest.java`, `LLMResponse.java`, `ChatMessage.java`: transport contracts, deadlines, conversation history, tool calls/results. `ChatMessage.userWithImages` adds bounded inline visual observations while preserving the existing text-only constructor and saved-history defaults.
 - `api/.../llm/model/ThinkingEffortSpec.java`: shared automatic reasoning input policy and restricted migration of legacy local effort values during restoration.
 - `engine/.../llm/OpenAICompatibleProvider.java`, `OllamaNativeProvider.java`: the two supported wire-protocol implementations; shared validation/serialization lives alongside them.
 - `engine/src/client/java/com/mineagent/engine/client/ui/ProviderPresets.java` and `screen/SpawnCompanionScreen.java`: supported local choices, model/endpoint editing, and connection setup.
@@ -84,6 +94,7 @@ All paths below are relative to this repository unless explicitly labeled extern
 - `LLMRequest.DEFAULT_DEADLINE` is the shared 180-second local inference default used by provider transport and every `AgentLoop` reasoning round. Preserve explicit caller deadlines and cancellation. The shorter connection-establishment timeout is separate from the inference deadline; check all layers together when changing either.
 - The external launcher reference is `<local-launcher>`. The mod connects over HTTP; it does not load files from that directory or start/modify the launcher.
 - Never load or download models, alter the external launcher, or treat an unrelated installed model as a suitable companion model without authorization.
+- Visual observations use at most six inline PNG/JPEG data URLs, at most 2 MiB decoded per image. OpenAI-compatible requests encode text/image content parts; native Ollama receives base64 in `images`. Remote image URLs and malformed payloads are rejected. A separate, explicitly configured local visual model must support images; do not infer vision capability from a model name or enable/download a model automatically.
 - Protocol fixtures prove request/response handling, not real model quality, MTP operation, or in-world behavior.
 
 ## Build and verification

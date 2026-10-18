@@ -23,6 +23,11 @@ final class NativeProviderSupport {
             JsonObject object = new JsonObject();
             object.addProperty("role", message.role());
             object.addProperty("content", message.content() == null ? "" : message.content());
+            if (!message.images().isEmpty()) {
+                JsonArray images = new JsonArray();
+                for (String image : message.images()) images.add(image.substring(image.indexOf(',') + 1));
+                object.add("images", images);
+            }
             if (message.toolCalls() != null && !message.toolCalls().isEmpty()) {
                 JsonArray calls = new JsonArray();
                 for (ChatMessage.ToolCallRef call : message.toolCalls()) {

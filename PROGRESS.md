@@ -35,6 +35,32 @@
 - Removed the inherited changelog at the user's request. Release history belongs in release notes rather than a separate tracked changelog.
 - Local Gradle builds, regression tests, repository checks, license, and upstream attribution are retained. Removing GitHub automation does not remove the requirement to verify changes locally.
 
+## Active player-like autonomy implementation
+
+Previous preparation below is complete. New implementation is authorized and not yet verified.
+
+- [ ] Default-safe, configurable player/companion combat; player-style world mutation protection and regressions.
+- [ ] Inventory conservation, cancellation and bounded execution with truthful observations.
+- [ ] Configurable English/PT-BR covering all model-facing language and new features.
+- [ ] AI-composed farming, storage, shelter and transport decisions with progressive context/tool disclosure.
+- [ ] Natural conversation without mandatory tags, mentions, special words or markup; preferences/goals/world memories influence decisions, not decorative roleplay.
+- [ ] Persistent construction design/revision/site assessment/material accounting/six-view previews/local visual review/physical execution.
+- [ ] Evidence-backed evolving identity, memory, periodic reflection and reasoned revision through conversation.
+- [ ] Integration review, regression tests, clean build, artifact inspection, documentation and incremental local commits; no push.
+
+Coordinator owns shared documentation and final integration. Disjoint implementation ownership is active:
+
+| Workstream | Owned source | Coordinator integration still required |
+| --- | --- | --- |
+| Safety | Combat entry points/tasks, interaction/world-mutation guards, new safety contracts/tests | Apply server policy at initialization/reload and review all bypass paths. |
+| Construction | New construction contracts, engine services, tools and tests | Register tools, connect persistence/lifecycle and optional visual review, inspect generated views. |
+| Identity | New identity services/tool, agent loop and memory persistence | Register tool, connect localization/configuration, review asynchronous cancellation and natural conversation. |
+| Localization | Runtime language API/catalog, configuration and EN/PT-BR UI resources/tests | Migrate remaining model-visible producers and wire configuration lifecycle. |
+| Inventory | Transfer/drop/equip/collect/craft paths and conservation tests | Review cancellation findings and exercise Minecraft integration. |
+| Coordinator | Provider/image contract, natural chat routing, registration/lifecycle, shared documentation and Git | Sole Gradle/build owner; review integrated results before completing checklist items. |
+
+Current verified checkpoint (not final integration): image attachments now pass real loopback HTTP fixtures for OpenAI-compatible and native Ollama transports. The contract preserves existing text constructors, rejects remote/invalid image data, and bounds each observation to six inline PNG/JPEG images of at most 2 MiB each. Strict RED/GREEN cycles passed all five new transport tests; the standalone provider regression selection passed 23 JUnit tests. Client preset tests require the Minecraft classpath and remain assigned to final Gradle verification. No real visual model, game session or final integrated build has been exercised for this phase. Recovery helpers currently needed by the coordinator are in ignored `.tools/parent-test/`; other agents own their ignored work directories and must report indispensable output paths.
+
 ## Completed preparation
 
 - Maintained `AGENTS.md` maps source files, design intent, local protocols, verification, privacy, Git ownership, and parallel-agent coordination. The preserved UI design-system document is linked and updated for NeoForge and local providers; stale cross-loader source comments were corrected without altering rendering behavior.
