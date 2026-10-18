@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   release:
-    name: Build and publish both loaders
+    name: Build and publish NeoForge
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -27,26 +27,39 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build both loader artifacts
+      - name: Check English text and capability inventory
+        run: python scripts/check_project.py
+
+      - name: Test and build NeoForge
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon clean :fabric:build :neoforge:build
+          ./gradlew --no-daemon clean :neoforge:test :neoforge:build
 
-      - name: Verify release JARs
+      - name: Verify regression tests ran and locate the release JAR
+        id: verify
         run: |
-          find fabric/build/libs -maxdepth 1 -name 'mineagent-fabric-*.jar' ! -name '*-sources.jar' | grep -q .
-          find neoforge/build/libs -maxdepth 1 -name 'mineagent-neoforge-*.jar' ! -name '*-sources.jar' | grep -q .
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          reports = list(Path('neoforge/build/test-results/test').glob('TEST-*.xml'))
+          assert reports, 'No JUnit reports: regression tests did not run'
+          assert sum(int(ET.parse(path).getroot().attrib['tests']) for path in reports) > 0
+          jars = [jar for jar in Path('neoforge/build/libs').glob('mineagentx-neoforge-*.jar')
+                  if not jar.name.endswith('-sources.jar')]
+          assert len(jars) == 1, f'Expected one release JAR, found {jars}'
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'jar={jars[0]}\n')
+          PY
 
-      - name: Create prerelease with Fabric and NeoForge JARs
+      - name: Create prerelease with NeoForge JAR
         env:
           GH_TOKEN: ${{ github.token }}
+          NEOFORGE_JAR: ${{ steps.verify.outputs.jar }}
         run: |
-          FABRIC_JAR="$(find fabric/build/libs -maxdepth 1 -name 'mineagent-fabric-*.jar' ! -name '*-sources.jar' -print -quit)"
-          NEOFORGE_JAR="$(find neoforge/build/libs -maxdepth 1 -name 'mineagent-neoforge-*.jar' ! -name '*-sources.jar' -print -quit)"
           gh release create "$GITHUB_REF_NAME" \
-            "$FABRIC_JAR" \
             "$NEOFORGE_JAR" \
             --repo "$GITHUB_REPOSITORY" \
-            --title "MineAgent $GITHUB_REF_NAME" \
-            --notes-file .github/release-notes.md \
+            --title "MineAgentX $GITHUB_REF_NAME" \
+            --generate-notes \
             --prerelease

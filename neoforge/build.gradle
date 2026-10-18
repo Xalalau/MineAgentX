@@ -1,14 +1,13 @@
 plugins {
     id 'java'
-    id 'net.neoforged.moddev' version '2.0.28-beta'
+    id 'net.neoforged.moddev' version '2.0.131'
 }
 
 group = rootProject.group
 version = rootProject.version
 
 base {
-    // NeoForge is released beside Fabric as an explicitly experimental asset.
-    archivesName = 'mineagent-neoforge'
+    archivesName = 'mineagentx-neoforge'
 }
 
 java {
@@ -29,8 +28,7 @@ sourceSets {
             srcDir project(':api').file('src/main/java')
             srcDir project(':engine').file('src/main/java')
             // The complete visual client is loader-neutral vanilla code.
-            // Both loader builds include this source set, but the standalone
-            // engine module and dedicated-server sources do not.
+            // The standalone engine module does not compile the client UI.
             srcDir project(':engine').file('src/client/java')
             srcDir project(':tools').file('src/main/java')
         }
@@ -47,6 +45,11 @@ dependencies {
 
 neoForge {
     version = project.property('neoforge_version')
+
+    // Apply the same mapped game and library dependencies to the migrated
+    // plain JUnit regressions. They do not need to launch a Minecraft server.
+    addModdingDependenciesTo sourceSets.test
+    validateAccessTransformers = true
 
     // ModDev does not infer the active development mod merely from
     // neoforge.mods.toml. Without this declaration resources were visible in
@@ -68,13 +71,22 @@ neoForge {
     }
 }
 
+tasks.named('test', Test) {
+    systemProperty 'mineagentx.projectRoot', rootProject.projectDir.absolutePath
+    // These tests are CPU/local-filesystem regressions; no game launch, remote
+    // model endpoint, or provider credentials are required.
+    testLogging {
+        events 'failed', 'skipped'
+    }
+}
+
 processResources {
     inputs.property 'version', project.version
-    from(project(':tools').sourceSets.main.resources)
+    inputs.property 'mod_name', project.property('mod_name')
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     filesMatching('META-INF/neoforge.mods.toml') {
         // NeoForge ModDev does not expand arbitrary Gradle placeholders by
         // default; without this, the installed mod reports "${version}".
-        expand version: project.version
+        expand version: project.version, mod_name: project.property('mod_name')
     }
 }

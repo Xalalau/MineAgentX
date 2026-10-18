@@ -9,7 +9,7 @@ java {
     toolchain.languageVersion = JavaLanguageVersion.of(21)
 }
 
-// This module is compiled as part of the fabric/neoforge loader module.
+// This module is compiled as part of the NeoForge module.
 // It does NOT compile independently — MC classes are provided by the loader.
 // The source files are included in the loader's compilation classpath.
 dependencies {

@@ -1,15 +1,15 @@
 modLoader = "javafml"
 loaderVersion = "[4,)"
 license = "LGPL-3.0-only"
-issueTrackerURL = "https://github.com/bingdongni/MineAgent/issues"
+issueTrackerURL = "https://github.com/Xalalau/MineAgentX/issues"
 
 [[mods]]
 modId = "mineagent"
 version = "${version}"
-displayName = "MineAgent"
-displayURL = "https://github.com/bingdongni/MineAgent"
+displayName = "${mod_name}"
+displayURL = "https://github.com/Xalalau/MineAgentX"
 description = '''
-AI-powered Minecraft companions that mine, build, fight, and explore alongside you.
+AI-powered Minecraft companions that mine, build, fight, and explore using local models.
 '''
 authors = "bingdongni"
 

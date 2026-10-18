@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build:
-    name: Java 21 / Fabric and NeoForge
+    name: Java 21 / NeoForge / Minecraft 1.21.1
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -28,26 +28,38 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build both loader artifacts
+      - name: Check English text and capability inventory
+        run: python scripts/check_project.py
+
+      - name: Test and build NeoForge
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon :fabric:build :neoforge:build
+          ./gradlew --no-daemon :neoforge:test :neoforge:build
 
-      - name: Verify release JARs
+      - name: Verify regression tests ran and the release JAR exists
         run: |
-          find fabric/build/libs -maxdepth 1 -name 'mineagent-fabric-*.jar' ! -name '*-sources.jar' | grep -q .
-          find neoforge/build/libs -maxdepth 1 -name 'mineagent-neoforge-*.jar' ! -name '*-sources.jar' | grep -q .
+          python - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          reports = list(Path('neoforge/build/test-results/test').glob('TEST-*.xml'))
+          assert reports, 'No JUnit reports: regression tests did not run'
+          suites = [ET.parse(path).getroot() for path in reports]
+          assert sum(int(suite.attrib['tests']) for suite in suites) > 0
+          jars = list(Path('neoforge/build/libs').glob('mineagentx-neoforge-*.jar'))
+          assert any(not jar.name.endswith('-sources.jar') for jar in jars), 'No release JAR'
+          PY
 
-      - name: Upload Fabric artifact
+      - name: Upload NeoForge artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mineagent-fabric
-          path: fabric/build/libs/mineagent-fabric-*.jar
+          name: mineagentx-neoforge
+          path: neoforge/build/libs/mineagentx-neoforge-*.jar
           if-no-files-found: error
 
-      - name: Upload experimental NeoForge artifact
+      - name: Upload regression test reports
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: mineagent-neoforge-experimental
-          path: neoforge/build/libs/mineagent-neoforge-*.jar
+          name: mineagentx-test-reports
+          path: neoforge/build/reports/tests/test/
           if-no-files-found: error

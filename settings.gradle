@@ -2,14 +2,12 @@ pluginManagement {
     repositories {
         gradlePluginPortal()
         maven { url = 'https://maven.neoforged.net/releases' }
-        maven { url = 'https://maven.fabricmc.net/' }
     }
 }
 
-rootProject.name = 'MineAgent'
+rootProject.name = 'MineAgentX'
 
 include 'api'
 include 'engine'
 include 'tools'
-include 'fabric'
 include 'neoforge'

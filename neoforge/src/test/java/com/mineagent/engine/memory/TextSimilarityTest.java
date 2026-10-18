@@ -9,27 +9,27 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class TextSimilarityTest {
-    @Test void chineseCharacterNgramsOutrankUnrelatedText() {
-        double related = TextSimilarity.score("收集木材建造房子", "砍树收集木材用于建造");
-        double unrelated = TextSimilarity.score("收集木材建造房子", "寻找钻石并与僵尸战斗");
+    @Test void relatedEnglishWordsOutrankUnrelatedText() {
+        double related = TextSimilarity.score("collect wood to build a house", "chop trees and collect wood to build");
+        double unrelated = TextSimilarity.score("collect wood to build a house", "find diamonds and fight zombies");
         assertTrue(related > unrelated);
     }
 
-    @Test void learnedParameterizedSkillCanBeRetrievedInChinese() {
+    @Test void learnedParameterizedSkillCanBeRetrievedInEnglish() {
         SkillLibrary library = new SkillLibrary();
-        library.registerSequence("wood_collection", "砍树并收集木材", "需要木材建造时",
+        library.registerSequence("wood_collection", "chop trees and collect wood", "when wood is needed to build",
                 "[{\"tool\":\"auto_mine\",\"args\":{\"block_id\":\"minecraft:oak_log\"}}]",
                 true);
-        assertFalse(library.retrieve("请收集一些木材来建造房屋").isEmpty());
+        assertFalse(library.retrieve("please collect some wood to build a house").isEmpty());
     }
 
     @Test void successfulRelevantExperienceIsNotHiddenByUnrelatedFailure() {
         ExperienceStore store = new ExperienceStore();
-        store.record("1", "auto_mine", "收集木材", TaskState.SUCCESS,
+        store.record("1", "auto_mine", "collect wood", TaskState.SUCCESS,
                 TaskSnapshot.running("complete", "logs collected"), "oak logs", 10L);
-        store.record("2", "goto", "寻找村庄", TaskState.FAILED,
+        store.record("2", "goto", "find a village", TaskState.FAILED,
                 TaskSnapshot.running("navigate", "failed"), "path timeout", 20L);
-        String summary = store.summarizeForPrompt("收集木材建造");
+        String summary = store.summarizeForPrompt("collect wood to build");
         assertTrue(summary.contains("auto_mine"));
         assertFalse(summary.contains("path timeout"));
     }
