@@ -30,6 +30,7 @@
 ## Repository simplification
 
 - Removed contribution documentation and the entire GitHub configuration directory at the user's request, including issue/PR templates, release notes, and automatic build/release workflows. Updated the agent guide accordingly.
+- Removed the inherited changelog at the user's request. Release history belongs in release notes rather than a separate tracked changelog.
 - Local Gradle builds, regression tests, repository checks, license, and upstream attribution are retained. Removing GitHub automation does not remove the requirement to verify changes locally.
 
 ## Work in progress

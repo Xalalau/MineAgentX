@@ -27,6 +27,8 @@ The coordinating agent owns shared documentation updates unless explicitly deleg
 - Legacy optional-mod integrations are not a priority. Do not automatically port Cobblemon, AE2, backpack, team, gadget, or artifact integrations.
 - Base architecture changes on inspected public source and verified requirements. Do not import private-repository references or comparison reports into this project.
 
+Release history belongs in release notes, not a tracked changelog. Do not recreate a standalone changelog unless requested.
+
 ## Repository map
 
 All paths below are relative to this repository unless explicitly labeled external.
