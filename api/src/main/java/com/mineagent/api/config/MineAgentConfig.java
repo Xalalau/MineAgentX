@@ -11,8 +11,60 @@ public record MineAgentConfig(
     LLMConfig llm,
     CompanionConfig companion,
     SurvivalConfig survival,
-    PathfindingConfig pathfinding
+    PathfindingConfig pathfinding,
+    String language,
+    SafetyConfig safety,
+    VisionConfig vision,
+    ReflectionConfig reflection
 ) {
+    public MineAgentConfig {
+        language = language == null ? "en_us" : language;
+        com.mineagent.api.i18n.Language.fromId(language);
+        safety = safety == null ? SafetyConfig.DEFAULTS : safety;
+        vision = vision == null ? VisionConfig.DEFAULTS : vision;
+        reflection = reflection == null ? ReflectionConfig.DEFAULTS : reflection;
+    }
+
+    /** Backward-compatible construction for callers that predate runtime policy. */
+    public MineAgentConfig(LLMConfig llm, CompanionConfig companion,
+                           SurvivalConfig survival, PathfindingConfig pathfinding) {
+        this(llm, companion, survival, pathfinding, "en_us", SafetyConfig.DEFAULTS,
+                VisionConfig.DEFAULTS, ReflectionConfig.DEFAULTS);
+    }
+
+    public record SafetyConfig(boolean allowPlayerAndCompanionAttacks) {
+        public static final SafetyConfig DEFAULTS = new SafetyConfig(false);
+    }
+
+    public record VisionConfig(boolean enabled, String provider, String apiKey,
+                               String model, String baseUrl) {
+        public static final VisionConfig DEFAULTS = new VisionConfig(false, "", "", "", "");
+
+        public VisionConfig {
+            provider = nonNull(provider);
+            apiKey = nonNull(apiKey);
+            model = nonNull(model);
+            baseUrl = nonNull(baseUrl);
+        }
+
+        /** Presence check only; the provider must still validate the local endpoint before I/O. */
+        public boolean configured() {
+            return enabled && ("ollama".equals(provider) || "openai-compatible".equals(provider))
+                    && model != null && !model.isBlank()
+                    && baseUrl != null && !baseUrl.isBlank();
+        }
+    }
+
+    /** Zero disables periodic reflection. Intervals are server game ticks. */
+    public record ReflectionConfig(int intervalTicks) {
+        public static final ReflectionConfig DEFAULTS = new ReflectionConfig(1200);
+
+        public ReflectionConfig {
+            intervalTicks = intervalTicks < 0 ? 1200
+                    : intervalTicks == 0 ? 0 : clamp(intervalTicks, 200, 72000);
+        }
+    }
+
     public record LLMConfig(
         String provider,
         String apiKey,
@@ -97,7 +149,15 @@ public record MineAgentConfig(
                     merged.getAsJsonObject("llm").addProperty("model", "");
                 }
                 mergeInto(merged, overrides);
+                JsonElement locale = merged.get("language");
+                if (!locale.isJsonPrimitive() || !locale.getAsJsonPrimitive().isString()) {
+                    throw new com.mineagent.api.i18n.Language.UnsupportedLanguageException(locale.toString());
+                }
+                com.mineagent.api.i18n.Language.fromId(locale.getAsString());
                 return normalize(GSON.fromJson(merged, MineAgentConfig.class));
+            } catch (com.mineagent.api.i18n.Language.UnsupportedLanguageException e) {
+                // A reload must not overwrite a user's endpoint/model because a locale ID is invalid.
+                throw e;
             } catch (Exception e) {
                 System.err.println("[MineAgent] Failed to load config: " + e.getMessage());
                 System.err.println("[MineAgent] Using defaults");
@@ -165,7 +225,8 @@ public record MineAgentConfig(
                 clamp(rawPathfinding.maxSearchNodes, 128, 1_000_000),
                 rawPathfinding.allowDigThrough, rawPathfinding.allowBridge,
                 rawPathfinding.allowParkour);
-        return new MineAgentConfig(llm, companion, survival, pathfinding);
+        return new MineAgentConfig(llm, companion, survival, pathfinding,
+                loaded.language, loaded.safety, loaded.vision, loaded.reflection);
     }
 
     private static String nonNull(String value) {

@@ -81,7 +81,7 @@
   "screen.mineagent.help.start.4": "4. Use Runtime Settings for temperature, name and effort changes.",
   "screen.mineagent.help.commands.title": "Commands",
   "screen.mineagent.help.commands.quick": "/mineagent quick [name] [auto] - create using saved settings and server reasoning defaults",
-  "screen.mineagent.help.commands.remove": "/mineagent remove - remove your primary companion",
+  "screen.mineagent.help.commands.remove": "/mineagent remove - remove all companions owned by you",
   "screen.mineagent.help.commands.respawn": "/mineagent respawn - restore a dead non-Hardcore companion",
   "screen.mineagent.help.commands.list": "/mineagent list - list active companions",
   "screen.mineagent.help.commands.providers": "/mineagent providers - list LLM providers",
