@@ -56,7 +56,7 @@ The three-companions-per-owner limit remains; the inherited code also requires d
 
 ## Privacy and security
 
-Chat and world context are sent to the configured local inference service. Runtime configuration and companion saves can contain plaintext credentials if supplied. Never publish these files, private logs, chat, or world saves. See [SECURITY.md](SECURITY.md).
+Chat and world context are sent to the configured local inference service. Runtime configuration and companion saves can contain plaintext credentials if supplied. Never publish these files, private logs, chat, or world saves.
 
 ## Development status
 

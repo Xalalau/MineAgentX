@@ -267,4 +267,4 @@ All notable changes to MineAgent will be documented in this file. The project fo
 
 - AI actions remain model-dependent and may be slow, inefficient, or incorrect.
 - NeoForge does not yet have Fabric-equivalent client UI, networking parity, or the same level of in-game validation.
-- LLM API keys are stored in plain text for companion restoration; see `SECURITY.md`.
+- LLM API keys are stored in plain text for companion restoration.

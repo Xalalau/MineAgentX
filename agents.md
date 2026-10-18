@@ -36,7 +36,7 @@ All paths below are relative to this repository unless explicitly labeled extern
 | `README.md` | Overview, local connection setup, build/install entry points. |
 | `CAPABILITIES.md` | Complete registered-tool inventory, slash commands, automatic behavior, and limitations. Section 6 covers local models only. |
 | `PROGRESS.md` | Authorization, exact recovery state, completed checks, remaining integration work, and blockers. Read after interruption or compaction. |
-| `CONTRIBUTING.md`, `SECURITY.md`, `LICENSE` | Contribution rules, sensitive-data boundaries, and original license. |
+| `CONTRIBUTING.md`, `LICENSE` | Contribution rules and original license. |
 | `settings.gradle`, `build.gradle`, `gradle.properties` | Module graph, common build/test settings, Minecraft/NeoForge versions, identity. Inspect current values rather than guessing versions. |
 | `api/src/main/java/com/mineagent/api/` | Loader-independent configuration, model/tool/task contracts, companion game modes, payload contracts, platform API. |
 | `engine/src/main/java/com/mineagent/engine/` | Companion runtime and action execution. |
