@@ -25,7 +25,7 @@ The coordinating agent owns shared documentation updates unless explicitly deleg
 - Do not port the old predefined cottage. The desired future building system is **design in coordinates, visualize, revise until satisfactory, map design coordinates to world coordinates, then build through normal companion actions**.
 - Existing `build` executes block-coordinate operations; it is not that future design/preview environment. Preserve navigation, reach/visibility checks, item use, and post-placement verification rather than adding arbitrary-distance world editing.
 - Legacy optional-mod integrations are not a priority. Do not automatically port Cobblemon, AE2, backpack, team, gadget, or artifact integrations.
-- Use the old project as evidence and reference, not as an automatic source of architecture. Reuse decisions belong in the comparison report under `docs/` and require source-backed justification.
+- Base architecture changes on inspected public source and verified requirements. Do not import private-repository references or comparison reports into this project.
 
 ## Repository map
 
@@ -47,7 +47,7 @@ All paths below are relative to this repository unless explicitly labeled extern
 | `neoforge/src/main/java/com/mineagent/neoforge/` | Only loader entry point, platform adapter, payload registration, client integration, and mixins. |
 | `neoforge/src/main/resources/META-INF/` | Mod metadata and access transformer. |
 | `neoforge/src/test/java/` | Migrated upstream regressions and new local-provider/English-protocol tests. Keep applicable tests when removing unsupported implementations. |
-| `scripts/check_project.py` | Repository gates: no Chinese project text and documented coverage of registered tools. |
+| `scripts/check_project.py` | Repository gates: English project text, no personal machine paths, and documented coverage of registered tools. |
 | `.github/workflows/build.yml`, `.github/workflows/release.yml` | NeoForge test/build and artifact/release automation. |
 | `neoforge/build/libs/` | Generated installable NeoForge JAR; never mistake a source/archive download for an installable mod. |
 
