@@ -4,19 +4,19 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 决策缓存 — 缓存相似情境下的 LLM 决策结果。
+ * Decision cache — reuses LLM decisions in similar situations.
  *
- * <p>目的：减少 LLM 调用次数，降低延迟。
- * 当 AI 在相似状态下收到相似指令时，直接复用之前的决策。
+ * <p>Purpose: reduce LLM calls and latency.
+ * When the AI receives a similar command in a similar state, reuse the previous decision.
  *
- * <p>Key 设计：(位置量化 + 血量区间 + 最近实体类型 + 玩家指令哈希)
- * Value：LLM 的决策结果（assistant message 的 content + tool_calls）
+ * <p>Key design: quantized position + health tier + nearest entity type + command hash
+ * Value: LLM decision (assistant message content + tool_calls)
  *
- * <p>TTL 30 秒，避免缓存过旧导致行为不合理。
+ * <p>A 30-second TTL avoids unreasonable behavior caused by stale decisions.
  */
 public class DecisionCache {
 
-    /** 缓存条目。 */
+    /** A cached decision. */
     private record CacheEntry(
             String decisionContent,
             String toolCallsJson,
@@ -29,31 +29,31 @@ public class DecisionCache {
 
     private final ConcurrentHashMap<String, CacheEntry> cache = new ConcurrentHashMap<>();
 
-    /** 缓存 TTL（毫秒）。
-     *  从 30 秒缩短到 10 秒，降低情境变化导致决策错乱的风险。
-     *  10 秒足够覆盖"挖矿连续操作"等重复场景，又不会让 AI
-     *  在玩家已离开后仍然重复旧决策。 */
+    /** Cache TTL in milliseconds.
+     *  Reduced from 30 seconds to 10 seconds to lower the risk of decisions outliving their context.
+     *  Ten seconds covers repetitive actions such as continuous mining without
+     *  repeating old decisions after the player has left. */
     private static final long TTL_MS = 10_000;
 
-    /** 最大缓存条目数。 */
+    /** Maximum number of cache entries. */
     private static final int MAX_SIZE = 500;
 
     /**
-     * 生成缓存 key。
+     * Generate a cache key.
      *
-     * @param posX       AI 玩家 X 坐标（量化到 4 格）
-     * @param posY       AI 玩家 Y 坐标（量化到 4 格）
-     * @param posZ       AI 玩家 Z 坐标（量化到 4 格）
-     * @param healthTier 血量区间（0-4 / 5-9 / 10-14 / 15-20）
-     * @param hungerTier 饥饿度区间
-     * @param nearestEntity 最近实体类型（或 null）
-     * @param command    玩家指令（或 null）
-     * @return 缓存 key
+     * @param posX AI player X coordinate (quantized to 4 blocks)
+     * @param posY AI player Y coordinate (quantized to 4 blocks)
+     * @param posZ AI player Z coordinate (quantized to 4 blocks)
+     * @param healthTier health tier (0-4 / 5-9 / 10-14 / 15-20)
+     * @param hungerTier hunger tier
+     * @param nearestEntity nearest entity type (or null)
+     * @param command player command (or null)
+     * @return cache key
      */
     public static String buildKey(int posX, int posY, int posZ,
                                     int healthTier, int hungerTier,
                                     String nearestEntity, String command) {
-        // 量化位置到 4 格精度
+        // Quantize position to 4-block precision
         int qx = posX >> 2; // posX / 4
         int qy = posY >> 2;
         int qz = posZ >> 2;
@@ -64,9 +64,9 @@ public class DecisionCache {
     }
 
     /**
-     * 查询缓存。
+     * Look up a cached decision.
      *
-     * @return 缓存的决策，或 null（未命中/已过期）
+     * @return cached decision, or null on a miss or expiration
      */
     public CacheEntry get(String key) {
         CacheEntry entry = cache.get(key);
@@ -78,7 +78,7 @@ public class DecisionCache {
     }
 
     /**
-     * 查询缓存中的决策文本。
+     * Look up cached decision text.
      */
     public String getDecision(String key) {
         CacheEntry entry = get(key);
@@ -86,7 +86,7 @@ public class DecisionCache {
     }
 
     /**
-     * 查询缓存中的工具调用 JSON。
+     * Look up cached tool-call JSON.
      */
     public String getToolCalls(String key) {
         CacheEntry entry = get(key);
@@ -94,14 +94,14 @@ public class DecisionCache {
     }
 
     /**
-     * 存入决策缓存。
+     * Store a decision in the cache.
      */
     public void put(String key, String decisionContent, String toolCallsJson) {
-        // 容量控制
+        // Enforce capacity
         if (cache.size() >= MAX_SIZE) {
-            // 简单清理：移除已过期的
+            // Simple cleanup: remove expired entries
             cache.entrySet().removeIf(e -> e.getValue().isExpired());
-            // 如果还是太大，清空一半
+            // If still too large, clear half the entries
             if (cache.size() >= MAX_SIZE) {
                 int half = cache.size() / 2;
                 var iter = cache.keySet().iterator();
@@ -117,21 +117,21 @@ public class DecisionCache {
     }
 
     /**
-     * 清空缓存。
+     * Clear the cache.
      */
     public void clear() {
         cache.clear();
     }
 
     /**
-     * 当前缓存大小。
+     * Current cache size.
      */
     public int size() {
         return cache.size();
     }
 
     /**
-     * 清理过期条目。
+     * Remove expired entries.
      */
     public void cleanExpired() {
         cache.entrySet().removeIf(e -> e.getValue().isExpired());

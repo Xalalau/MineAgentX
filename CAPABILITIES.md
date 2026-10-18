@@ -173,6 +173,7 @@ MineAgentX supports two local inference backends: **native Ollama** and **Bonsai
 - Use the native Ollama chat protocol, `POST /api/chat`, with the server endpoint and model ID configured explicitly.
 - A typical local server root is `http://127.0.0.1:11434`; this is an example, not evidence that Ollama is running or a specific model is installed.
 - The model must support the agent tool-calling workflow; validate it against the actual server. Do not substitute a guessed installed model name.
+- Partial Ollama configuration selects the native endpoint by default but never inherits the Bonsai model alias; a missing model must be configured explicitly.
 
 ### Bonsai/MTP
 
@@ -184,8 +185,8 @@ MineAgentX supports two local inference backends: **native Ollama** and **Bonsai
 - Chat endpoint: `POST /v1/chat/completions`.
 - The endpoint and model remain configurable for the local deployment. Loopback refers to the machine running the Minecraft server, not necessarily the player's client or this assistant's container.
 - The companion connects over HTTP; it does not load a GGUF from the launcher directory, start the launcher, or change MTP, model, context allocation, or template settings.
-- Automatic/default reasoning behavior must preserve the server's template policy rather than unconditionally overriding it.
-- Timeouts and output limits must accommodate local inference; compatibility must be verified with the actual model before claiming it works in-world.
+- Automatic/default reasoning behavior preserves the server's template policy. New inputs accept blank/`auto`, not explicit cloud-style budgets. Restoring supported local saves migrates recognized legacy effort values to `auto` with a diagnostic; unsupported adapters and saved endpoints are not silently remapped.
+- Request defaults, provider transport, and agent reasoning rounds share a 180-second local inference deadline. Explicit request deadlines remain supported; cancellation and current-task checks still apply. Output limits and actual model compatibility must be validated before claiming it works in-world.
 
 No cloud-provider integrations are part of this fork's supported connection surface. A documented alias or endpoint is not proof that the service is currently running. A protocol regression test against a local test server is not a real Bonsai quality evaluation.
 
@@ -218,7 +219,7 @@ All commands use `/mineagent`:
 | `setskin <playername\|default\|steve\|alex>` | Apply or reset a skin. |
 | `resetskin` | Restore the default skin. |
 | `rename <name>` | Rename the companion. |
-| `seteffort [name] <off\|low\|medium\|high\|xhigh\|max>` | Set reasoning effort where supported; use automatic/default behavior for the documented local template unless verified otherwise. |
+| `seteffort [name] <auto>` | Keep the local server in control of reasoning/template policy; explicit cloud-style effort levels are not supported. |
 
 ## 9. Platform, limits, and future direction
 

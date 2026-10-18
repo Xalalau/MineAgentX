@@ -18,6 +18,9 @@ public record LLMRequest(String baseUrl, String apiKey, String model,
                          String reasoningEffort, String previousResponseId,
                          String conversationId, String promptCacheKey,
                          Duration deadline, boolean allowServerCompaction) {
+    /** Shared upper bound for a local inference round; explicit deadlines are preserved. */
+    public static final Duration DEFAULT_DEADLINE = Duration.ofSeconds(180);
+
     /** Source-compatible constructor for integrations written against the
      * stage-0 state-aware request contract. The same messages are used as the
      * complete local fallback when no separate history is supplied. */
@@ -47,7 +50,7 @@ public record LLMRequest(String baseUrl, String apiKey, String model,
         conversationId = blankToNull(conversationId);
         promptCacheKey = blankToNull(promptCacheKey);
         deadline = deadline == null || deadline.isNegative() || deadline.isZero()
-                ? Duration.ofSeconds(30) : deadline;
+                ? DEFAULT_DEADLINE : deadline;
         maxTokens = Math.max(1, maxTokens);
         temperature = Double.isFinite(temperature)
                 ? Math.max(0.0, Math.min(2.0, temperature)) : 0.0;

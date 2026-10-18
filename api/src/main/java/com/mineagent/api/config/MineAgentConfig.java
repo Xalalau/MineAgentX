@@ -4,6 +4,7 @@ import com.google.gson.*;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
+import java.util.Locale;
 import java.util.Map;
 
 public record MineAgentConfig(
@@ -21,7 +22,8 @@ public record MineAgentConfig(
         int maxTokens
     ) {
         public static final LLMConfig DEFAULTS = new LLMConfig(
-            "deepseek", "", "deepseek-chat", "", 0.7, 4096
+            "openai-compatible", "", "swift-bonsai2-27b-katana-mtp",
+            "http://127.0.0.1:8899/v1", 0.7, 4096
         );
     }
 
@@ -84,7 +86,17 @@ public record MineAgentConfig(
                 // false, which made ordinary version upgrades crash or disable
                 // newly introduced safety features.
                 JsonObject merged = GSON.toJsonTree(DEFAULTS).getAsJsonObject();
-                mergeInto(merged, parsed.getAsJsonObject());
+                JsonObject overrides = parsed.getAsJsonObject();
+                JsonElement provider = overrides.has("llm") && overrides.get("llm").isJsonObject()
+                        ? overrides.getAsJsonObject("llm").get("provider") : null;
+                if (provider != null && provider.isJsonPrimitive()
+                        && "ollama".equalsIgnoreCase(provider.getAsString().trim())) {
+                    // Choose protocol defaults before applying user overrides;
+                    // Ollama must not inherit the Bonsai endpoint or model alias.
+                    merged.getAsJsonObject("llm").addProperty("baseUrl", "http://127.0.0.1:11434");
+                    merged.getAsJsonObject("llm").addProperty("model", "");
+                }
+                mergeInto(merged, overrides);
                 return normalize(GSON.fromJson(merged, MineAgentConfig.class));
             } catch (Exception e) {
                 System.err.println("[MineAgent] Failed to load config: " + e.getMessage());
@@ -112,15 +124,18 @@ public record MineAgentConfig(
     private static MineAgentConfig normalize(MineAgentConfig loaded) {
         if (loaded == null) return DEFAULTS;
         LLMConfig rawLlm = loaded.llm != null ? loaded.llm : LLMConfig.DEFAULTS;
+        String provider = nonBlank(rawLlm.provider, LLMConfig.DEFAULTS.provider)
+                .toLowerCase(Locale.ROOT);
         double temperature = Double.isFinite(rawLlm.temperature)
                 && rawLlm.temperature >= 0.0 && rawLlm.temperature <= 2.0
                 ? rawLlm.temperature : LLMConfig.DEFAULTS.temperature;
         int maxTokens = rawLlm.maxTokens > 0 && rawLlm.maxTokens <= 1_000_000
                 ? rawLlm.maxTokens : LLMConfig.DEFAULTS.maxTokens;
         LLMConfig llm = new LLMConfig(
-                nonBlank(rawLlm.provider, LLMConfig.DEFAULTS.provider),
+                provider,
                 nonNull(rawLlm.apiKey),
-                nonBlank(rawLlm.model, LLMConfig.DEFAULTS.model),
+                nonBlank(rawLlm.model, "ollama".equals(provider)
+                        ? "" : LLMConfig.DEFAULTS.model),
                 nonNull(rawLlm.baseUrl), temperature, maxTokens);
 
         CompanionConfig rawCompanion = loaded.companion != null

@@ -36,13 +36,12 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
 /**
- * Shared client state and behavior used by both loader implementations.
+ * Shared client state and behavior for the NeoForge client.
  *
- * <p>This class deliberately contains no Fabric or NeoForge references.
- * Platform adapters register their event callbacks and inject the one
- * loader-specific operation, sending a UI payload to the server. This keeps
- * the complete visual client identical on both platforms without putting
- * client classes in the engine's dedicated-server source set.
+ * <p>This class deliberately contains no loader API references. The NeoForge
+ * adapter registers its event callbacks and injects the loader-specific
+ * operation that sends a UI payload to the server. Client classes remain
+ * outside the engine's dedicated-server source set.
  */
 public final class MineAgentClientController {
 
@@ -172,9 +171,7 @@ public final class MineAgentClientController {
     /** Render both the compact corner panel and contextual head labels. */
     public static void renderHud(GuiGraphics graphics, DeltaTracker deltaTracker) {
         if (graphics == null || deltaTracker == null) return;
-        // The old Fabric adapter only rendered labels, so H toggled an
-        // invisible panel. Rendering both here makes the binding functional
-        // and gives NeoForge the exact same HUD.
+        // Render both status and labels so the HUD toggle controls a visible panel.
         CompanionStatusPanel.render(graphics, deltaTracker);
         CompanionLabelRenderer.renderHud(graphics, deltaTracker);
     }

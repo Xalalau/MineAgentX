@@ -19,7 +19,7 @@ import net.minecraft.network.chat.Component;
  * within the visible screen area even on small GUIscales.
  *
  * <p>This is NOT a Screen - it renders directly on the HUD via
- * Fabric's {@code HudRenderCallback}.
+ * the NeoForge HUD rendering integration.
  */
 public final class CompanionStatusPanel {
 
@@ -102,7 +102,7 @@ public final class CompanionStatusPanel {
 
     /**
      * Render the companion status panel on the HUD.
-     * Called from the Fabric HudRenderCallback.
+     * Called from the shared client controller during NeoForge HUD rendering.
      *
      * @param graphics    the GuiGraphics context
      * @param deltaTracker the frame delta tracker

@@ -3,25 +3,25 @@ package com.mineagent.engine.behavior;
 import java.util.Random;
 
 /**
- * 行为噪声层 — 让AI的动作更像真人，消除机械感。
+ * Behavioral noise layer — makes AI actions feel more human and less mechanical.
  *
- * <p>真人玩家与机器人的核心差异（来自反作弊检测研究）：
+ * <p>Key differences between human players and bots (from anti-cheat research):
  * <ul>
- *   <li>动作间隔有抖动（机器是毫秒级精确）</li>
- *   <li>转向是平滑曲线而非线性（机器瞬切）</li>
- *   <li>复杂局面会犹豫停顿（机器速度不变）</li>
- *   <li>偶尔犯小错再纠正（机器完美执行）</li>
+ *   <li>Action intervals vary (machines are precise to the millisecond)</li>
+ *   <li>Turning follows smooth curves rather than linear steps (bots snap instantly)</li>
+ *   <li>Complex situations cause hesitation (bots maintain constant speed)</li>
+ *   <li>Small mistakes are sometimes made and then corrected (bots execute perfectly)</li>
  * </ul>
  *
- * <p>本类作为包裹层，为上层决策提供"人化"修饰：
+ * <p>This wrapper adds human-like variation to higher-level decisions:
  * <ul>
- *   <li>{@link #jitterInterval} — 给动作间隔加高斯抖动</li>
- *   <li>{@link #easeInOutTurn} — 用 ease-in-out 曲线平滑转向</li>
- *   <li>{@link #maybeHesitate} — 概率性注入思考停顿</li>
- *   <li>{@link #maybeMistake} — 概率性注入小错误+纠正</li>
+ *   <li>{@link #jitterInterval} — add Gaussian jitter to action intervals</li>
+ *   <li>{@link #easeInOutTurn} — smooth turns with an ease-in-out curve</li>
+ *   <li>{@link #maybeHesitate} — probabilistically introduce a thinking pause</li>
+ *   <li>{@link #maybeMistake} — probabilistically introduce a small mistake and correction</li>
  * </ul>
  *
- * <p>所有方法都是静态工具，无状态，可安全并发调用。
+ * <p>All methods are stateless static utilities and safe for concurrent calls.
  */
 public final class HumanLikeNoise {
 
@@ -29,20 +29,20 @@ public final class HumanLikeNoise {
 
     private static final Random RNG = new Random();
 
-    /** 高斯抖动的标准差（±15%间隔）。 */
+    /** Standard deviation of Gaussian jitter (±15% of the interval). */
     private static final double INTERVAL_JITTER_STD = 0.15;
 
-    /** 思考停顿触发概率（3%）。 */
+    /** Probability of a thinking pause (3%). */
     private static final double HESITATE_PROB = 0.03;
 
-    /** 小错误触发概率（1.5%）。 */
+    /** Probability of a small mistake (1.5%). */
     private static final double MISTAKE_PROB = 0.015;
 
     /**
-     * 给一个基准间隔加 ±15% 高斯抖动。
+     * Add ±15% Gaussian jitter to a base interval.
      *
-     * @param baseIntervalMs 基准间隔（毫秒）
-     * @return 加噪后的间隔
+     * @param baseIntervalMs base interval in milliseconds
+     * @return interval with noise applied
      */
     public static long jitterInterval(long baseIntervalMs) {
         double noise = RNG.nextGaussian() * INTERVAL_JITTER_STD;
@@ -51,91 +51,91 @@ public final class HumanLikeNoise {
     }
 
     /**
-     * Ease-in-out 平滑转向曲线。
+     * Ease-in-out curve for smooth turning.
      *
-     * <p>当前 Movement 用线性 15°/tick 转向，看起来像机器人。
-     * 真人转向是"先快后慢"（接近目标角度时减速）。
-     * 本方法把线性 progress (0→1) 映射为 ease-in-out 曲线，
-     * 使得转向开始和结束时都更平滑。
+     * <p>Movement currently turns linearly at 15°/tick, which looks robotic.
+     * Human turns start quickly and slow as they approach the target angle.
+     * This method maps linear progress (0→1) onto an ease-in-out curve,
+     * making the beginning and end of a turn smoother.
      *
-     * @param linearProgress 线性进度 [0, 1]
-     * @return ease-in-out 调整后的进度 [0, 1]
+     * @param linearProgress linear progress [0, 1]
+     * @return ease-in-out adjusted progress [0, 1]
      */
     public static float easeInOutTurn(float linearProgress) {
-        // 经典 ease-in-out: 3*t^2 - 2*t^3 (smoothstep)
+        // Classic ease-in-out: 3*t^2 - 2*t^3 (smoothstep)
         float p = clamp(linearProgress, 0f, 1f);
         return p * p * (3f - 2f * p);
     }
 
     /**
-     * 根据剩余角度差计算本 tick 应转多少度。
+     * Calculate how many degrees to turn this tick from the remaining angle.
      *
-     * <p>接近目标时减速（ease-out），远处时快速转（ease-in）。
-     * 这模拟真人"甩鼠标"的行为：快速转向大致方向，然后微调对准。
+     * <p>Slow down near the target (ease-out), turn quickly farther away (ease-in).
+     * This simulates a mouse flick: turn quickly toward the general direction, then fine-tune.
      *
-     * @param remainingDiff 剩余角度差（度，已 wrap 到 -180~180）
-     * @param maxPerTick    每 tick 最大转角度
-     * @return 本 tick 实际转角度
+     * @param remainingDiff remaining angle in degrees, wrapped to -180~180
+     * @param maxPerTick maximum turn angle per tick
+     * @return actual turn angle for this tick
      */
     public static float adaptiveTurn(float remainingDiff, float maxPerTick) {
         float absDiff = Math.abs(remainingDiff);
         if (absDiff < 0.5f) return 0;
 
-        // 远处快速转（满速），近处减速
-        // 当角度差 > 45° 时满速转
-        // 当角度差 < 45° 时按 ease-out 减速
+        // Turn quickly at large differences (full speed), slow down near the target
+        // Use full speed when the angle difference is > 45°
+        // Ease out when the angle difference is < 45°
         float speedRatio;
         if (absDiff > 45f) {
             speedRatio = 1.0f;
         } else {
-            // ease-out: (diff/45)^0.5，开方让减速更自然
+            // ease-out: (diff/45)^0.5; the square root makes deceleration more natural
             float t = absDiff / 45f;
             speedRatio = (float) Math.sqrt(t);
         }
 
         float turn = Math.signum(remainingDiff) * Math.min(maxPerTick, absDiff * speedRatio);
-        // 加微小抖动（真人手不可能完美稳定）
+        // Add tiny jitter (human hands are never perfectly steady)
         turn += (RNG.nextFloat() - 0.5f) * 0.8f;
         return turn;
     }
 
     /**
-     * 概率性决定是否需要"犹豫停顿"。
+     * Probabilistically decide whether a hesitation pause is needed.
      *
-     * <p>真人在复杂局面会短暂停顿"想一想"。
-     * 约 3% 概率返回 true，调用方应在此时注入 200-500ms 延迟。
+     * <p>Human players briefly pause to think in complex situations.
+     * Returns true about 3% of the time; callers should inject a 200-500ms delay.
      *
-     * @return true 表示应该犹豫一下
+     * @return true when a brief hesitation should occur
      */
     public static boolean maybeHesitate() {
         return RNG.nextDouble() < HESITATE_PROB;
     }
 
     /**
-     * 犹豫停顿时长（200-500ms）。
+     * Duration of a hesitation pause (200-500ms).
      */
     public static int hesitationDurationMs() {
         return 200 + RNG.nextInt(301); // 200-500ms
     }
 
     /**
-     * 概率性决定是否需要"小错误+纠正"。
+     * Probabilistically decide whether to make a small mistake and correction.
      *
-     * <p>约 1.5% 概率返回 true，调用方应注入一个小错误
-     * （如挖错一块、多走一步），然后立即纠正。
-     * 这是消除"完美执行"人机感的关键。
+     * <p>Returns true about 1.5% of the time; callers should inject a small mistake
+     * (such as mining the wrong block or walking one step too far), then correct it immediately.
+     * This helps avoid the robotic impression of perfect execution.
      *
-     * @return true 表示应该犯个小错
+     * @return true when a small mistake should occur
      */
     public static boolean maybeMistake() {
         return RNG.nextDouble() < MISTAKE_PROB;
     }
 
     /**
-     * 给移动速度加微小抖动，模拟真人手抖。
+     * Add tiny movement-speed jitter to simulate human hand tremor.
      *
-     * @param baseSpeed 基准速度 [0, 1]
-     * @return 加噪后速度（±5%）
+     * @param baseSpeed base speed [0, 1]
+     * @return speed with noise applied (±5%)
      */
     public static float jitterSpeed(float baseSpeed) {
         // Zero is an intentional stop while pathing turns in place. Adding

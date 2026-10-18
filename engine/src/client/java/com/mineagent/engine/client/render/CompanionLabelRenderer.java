@@ -31,9 +31,8 @@ import java.util.List;
  * texture atlas, accessed via {@link GuiSpriteManager#getSprite(ResourceLocation)}.
  * The {@code Minecraft.guiAtlasManager} field is private final, so we use
  * reflection (cached on first successful lookup) to retrieve the manager.
- * This avoids requiring an access widener entry while still supporting
- * multiple mappings versions (dev uses Mojang names, production uses
- * Fabric intermediary names).
+ * The lookup supports multiple historical field names without assuming
+ * that an obsolete loader or mapping namespace is active.
  *
  * <p><b>Layout (matches vanilla HUD style)</b>:
  * <ul>
@@ -135,8 +134,8 @@ public final class CompanionLabelRenderer {
      *
      * <p>In Mojang official mappings the field is {@code guiAtlasManager}
      * (private final in {@link Minecraft}). We try multiple candidate names
-     * for safety across mappings versions: dev environment uses Mojang names,
-     * production environment uses Fabric intermediary names.
+     * for compatibility with historical mapping names. This does not imply
+     * support for another loader.
      *
      * <p>The lookup result is cached: the first successful access stores the
      * manager in {@link #cachedSpriteManager}; the first total failure sets

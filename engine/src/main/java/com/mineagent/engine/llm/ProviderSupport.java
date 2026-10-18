@@ -2,6 +2,7 @@ package com.mineagent.engine.llm;
 
 import com.mineagent.api.llm.ChatMessage;
 import com.mineagent.api.llm.provider.LLMProviderException;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -13,6 +14,43 @@ import java.net.URI;
 final class ProviderSupport {
 
     private ProviderSupport() {}
+
+    /** Reject invalid announced calls rather than accepting a partial or empty tool turn. */
+    static JsonArray validatedToolCalls(JsonObject message) {
+        JsonElement calls = message.get("tool_calls");
+        if (calls == null || calls.isJsonNull()) return new JsonArray();
+        if (!calls.isJsonArray()) {
+            throw new IllegalArgumentException("tool_calls must be an array");
+        }
+        for (JsonElement item : calls.getAsJsonArray()) {
+            if (!item.isJsonObject() || !item.getAsJsonObject().has("function")
+                    || !item.getAsJsonObject().get("function").isJsonObject()) {
+                throw new IllegalArgumentException("tool call must contain a function object");
+            }
+            JsonElement name = item.getAsJsonObject().getAsJsonObject("function").get("name");
+            if (name == null || !name.isJsonPrimitive() || !name.getAsJsonPrimitive().isString()
+                    || name.getAsString().isBlank()) {
+                throw new IllegalArgumentException("tool function name must be a nonblank string");
+            }
+        }
+        return calls.getAsJsonArray();
+    }
+
+    /** Preserve valid server IDs exactly and reject ambiguous result correlation. */
+    static String toolCallId(JsonObject call, java.util.Set<String> seenIds, String prefix) {
+        JsonElement supplied = call.get("id");
+        if (supplied == null || supplied.isJsonNull()) {
+            String generated;
+            do { generated = prefix + java.util.UUID.randomUUID(); }
+            while (!seenIds.add(generated));
+            return generated;
+        }
+        if (!supplied.isJsonPrimitive() || !supplied.getAsJsonPrimitive().isString()
+                || supplied.getAsString().isBlank() || !seenIds.add(supplied.getAsString())) {
+            throw new IllegalArgumentException("tool call IDs must be nonblank unique strings");
+        }
+        return supplied.getAsString();
+    }
 
     static String validatedBaseUrl(String configured, String fallback,
                                    String provider) {
@@ -33,6 +71,23 @@ final class ProviderSupport {
                 || uri.getFragment() != null) {
             throw new IllegalArgumentException(provider
                     + " base URL must be an absolute HTTP(S) URL without query or fragment");
+        }
+        // Only loopback, private LAN, link-local, and IPv6 unique-local hosts
+        // are allowed. Check every DNS answer rather than accepting a public
+        // address hidden behind a friendly local-looking hostname.
+        try {
+            for (java.net.InetAddress address : java.net.InetAddress.getAllByName(uri.getHost())) {
+                byte[] bytes = address.getAddress();
+                boolean uniqueLocal = bytes.length == 16 && (bytes[0] & 0xfe) == 0xfc;
+                if (address.isAnyLocalAddress() || address.isMulticastAddress()
+                        || !(address.isLoopbackAddress() || address.isSiteLocalAddress()
+                        || address.isLinkLocalAddress() || uniqueLocal)) {
+                    throw new IllegalArgumentException(provider
+                            + " requires a loopback or private LAN server; public endpoints are disabled");
+                }
+            }
+        } catch (java.net.UnknownHostException unresolved) {
+            throw new IllegalArgumentException(provider + " local server hostname cannot be resolved", unresolved);
         }
         // Callers append a fixed API suffix; trimming avoids a double slash
         // that strict reverse proxies may reject.
@@ -96,8 +151,8 @@ final class ProviderSupport {
     }
 
     /**
-     * Convert persisted tool arguments into the object shape required by
-     * Anthropic and Gemini. A malformed historical argument must not poison
+     * Convert persisted tool arguments into Ollama's native object shape.
+     * A malformed historical argument must not poison
      * every later request; the tool result already records the original
      * failure, so an empty object is the only safe replay representation.
      */

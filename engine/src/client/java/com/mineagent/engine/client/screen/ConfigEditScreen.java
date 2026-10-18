@@ -1,5 +1,6 @@
 package com.mineagent.engine.client.screen;
 
+import com.mineagent.api.llm.model.ThinkingEffortSpec;
 import com.mineagent.engine.client.ui.MineAgentUiComponents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -7,8 +8,6 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
-
-import java.util.List;
 
 /** Edits runtime defaults without duplicating provider connection settings. */
 public class ConfigEditScreen extends Screen {
@@ -112,8 +111,14 @@ public class ConfigEditScreen extends Screen {
         if (this.minecraft.player == null) return;
         String rawTemperature = temperatureField.getValue().trim();
         String name = ClientCommandInput.greedy(nameField.getValue(), 32);
-        String rawEffort = thinkingEffortField.getValue().trim().toLowerCase();
-        String effort = ClientCommandInput.word(rawEffort, 8);
+        String rawEffort = thinkingEffortField.getValue().trim();
+        String effort;
+        try {
+            effort = rawEffort.isEmpty() ? "" : ThinkingEffortSpec.normalize(rawEffort);
+        } catch (IllegalArgumentException invalidEffort) {
+            showError("screen.mineagent.error.effort");
+            return;
+        }
 
         String temperature = "";
         if (!rawTemperature.isEmpty()) {
@@ -128,19 +133,13 @@ public class ConfigEditScreen extends Screen {
                 return;
             }
         }
-        if (!rawEffort.isEmpty() && (!effort.equals(rawEffort)
-                || !List.of("off", "low", "medium", "high", "xhigh", "max")
-                        .contains(effort))) {
-            showError("screen.mineagent.error.effort");
-            return;
-        }
         if (temperature.isEmpty() && name.isEmpty() && effort.isEmpty()) {
             showError("screen.mineagent.error.no_changes");
             return;
         }
 
-        // All values are checked first; an invalid later field therefore cannot
-        // leave an earlier setting persisted while the UI reports failure.
+        // Validate all inputs before queuing independent commands. The server
+        // authorizes and reports each outcome; queuing does not mean applied.
         if (!temperature.isEmpty()) {
             this.minecraft.player.connection.sendCommand(
                     "mineagent setconfig temperature " + temperature);
@@ -153,7 +152,7 @@ public class ConfigEditScreen extends Screen {
             this.minecraft.player.connection.sendCommand("mineagent seteffort " + effort);
         }
         this.minecraft.player.displayClientMessage(
-                Component.translatable("screen.mineagent.runtime.applied"), false);
+                Component.translatable("screen.mineagent.runtime.queued"), false);
         Minecraft.getInstance().setScreen(new MineAgentMainMenuScreen());
     }
 

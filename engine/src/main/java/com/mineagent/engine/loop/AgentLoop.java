@@ -122,15 +122,15 @@ public class AgentLoop {
      *  a vein block-by-block). */
     private static final boolean DECISION_CACHE_ENABLED = true;
 
-    /** 连续缓存命中上限。
-     *  连续命中达到此次数后，强制走一次 LLM 调用，防止 AI 陷入
-     *  "卡带"式重复（同一决策无限循环）。
-     *  设为 2：允许 1 次复用（覆盖连续挖矿场景），第 3 次强制思考。 */
+    /** Maximum consecutive cache hits.
+     *  Force an LLM call after this many consecutive hits to prevent the AI
+     *  from endlessly repeating the same cached decision.
+     *  Set to 2: allow consecutive mining reuse, then force reasoning on the third lookup. */
     private static final int MAX_CONSECUTIVE_CACHE_HITS = 2;
 
-    /** 纯文本响应补救次数上限。
-     *  当 LLM 说了要行动但没调用工具时，给它 N 次机会补救。
-     *  超过后真正结束回合，避免无限递归。 */
+    /** Maximum remediation attempts for a text-only response.
+     *  Give the LLM N chances to call a tool when it promised an action but did not act.
+     *  End the turn after that limit to avoid unbounded recursion. */
     private static final int MAX_REMEDIATION_ROUNDS = 1;
 
     /**
@@ -170,9 +170,9 @@ public class AgentLoop {
     private static final Set<String> GUI_EXTRA_TOOLS = Set.of(
             "inspect_gui", "close_gui", "inspect_block", "inspect_block_storage");
 
-    /** 距上次玩家消息的时间（毫秒）。
-     *  如果玩家刚刚说话（<30秒），不使用缓存 — 对话场景需要
-     *  LLM 真正理解并回应，缓存复用会导致答非所问。 */
+    /** Time since the last player message, in milliseconds.
+     *  Skip the cache if the player spoke recently (<30 seconds): conversation
+     *  needs genuine LLM understanding, and replayed decisions may answer the wrong question. */
     private static final long CACHE_SKIP_AFTER_PLAYER_MSG_MS = 30_000;
 
     private final AgentPlayer companion;
@@ -304,11 +304,11 @@ public class AgentLoop {
     private final RealtimeCognition realtimeCognition;
     /** Spatial memory — records points of interest discovered while
      *  exploring (ores, structures, hazards, chests). Backs the
-     *  "记忆点" section of the system prompt so the LLM can recall
+     *  "Location memory" section of the system prompt so the LLM can recall
      *  "I saw iron at (10, 64, -5)" without re-scanning. */
     private final com.mineagent.engine.memory.CognitiveMap cognitiveMap;
-    /** 记忆持久化：游戏关闭时保存记忆，重启后恢复（解决"失忆"问题）。
-     *  可为 null — 当 world data dir 尚未设置时（记忆不持久化，仅内存）。 */
+    /** Persist memories on game shutdown and restore them on restart to avoid amnesia.
+     *  May be null until the world data directory is set; memories then remain in RAM only. */
     private final com.mineagent.engine.memory.MemoryPersistence persistence;
     /** Stateful Responses transport is isolated per companion, never shared by registry singletons. */
     private final AtomicReference<ProviderSessionState> providerTransportState;
@@ -588,14 +588,12 @@ public class AgentLoop {
         theoryOfMind.observe(message, gameTime);
         // Detect feedback tone (simple heuristic)
         String lower = message.toLowerCase();
-        if (lower.contains("谢谢") || lower.contains("thanks") || lower.contains("好样的")
-                || lower.contains("干得好") || lower.contains("good") || lower.contains("不错")) {
+        if (lower.contains("thanks") || lower.contains("good")) {
             theoryOfMind.onPlayerFeedback(true);
             emotion.onPraised();
             persona.drift(true);
-        } else if (lower.contains("笨") || lower.contains("蠢") || lower.contains("stupid")
-                || lower.contains("别") || lower.contains("不要") || lower.contains("no")
-                || lower.contains("stop") || lower.contains("停下")) {
+        } else if (lower.contains("stupid") || lower.contains("no")
+                || lower.contains("stop")) {
             theoryOfMind.onPlayerFeedback(false);
             emotion.onScolded();
             persona.drift(false);
@@ -621,16 +619,14 @@ public class AgentLoop {
         // else-if chain only fired the first match, silently dropping the
         // rest.
         String lower = narrative.toLowerCase();
-        if (lower.contains("attack") || lower.contains("被攻击") || lower.contains("damage")
-                || lower.contains("受伤") || lower.contains("hurt")) {
+        if (lower.contains("attack") || lower.contains("damage")
+                || lower.contains("hurt")) {
             emotion.onAttacked();
         }
-        if (lower.contains("danger") || lower.contains("危险")
-                || lower.contains("creeper") || lower.contains("苦力怕")) {
+        if (lower.contains("danger") || lower.contains("creeper")) {
             emotion.onSeeDanger();
         }
-        if (lower.contains("diamond") || lower.contains("钻石")
-                || lower.contains("treasure") || lower.contains("宝藏")) {
+        if (lower.contains("diamond") || lower.contains("treasure")) {
             emotion.onFindTreasure();
         }
         if (lower.contains("owner") && (lower.contains("hurt") || lower.contains("damage"))) {
@@ -962,16 +958,16 @@ public class AgentLoop {
                 String subject = "unknown";
                 String type = "event";
                 String lower = narrative.toLowerCase();
-                if (lower.contains("iron_ore") || lower.contains("铁矿")) { subject = "iron_ore"; type = "resource"; }
-                else if (lower.contains("coal") || lower.contains("煤")) { subject = "coal_ore"; type = "resource"; }
-                else if (lower.contains("diamond") || lower.contains("钻石")) { subject = "diamond_ore"; type = "resource"; }
-                else if (lower.contains("gold") || lower.contains("金矿")) { subject = "gold_ore"; type = "resource"; }
-                else if (lower.contains("cow") || lower.contains("牛")) { subject = "cow"; type = "entity"; }
-                else if (lower.contains("sheep") || lower.contains("羊")) { subject = "sheep"; type = "entity"; }
-                else if (lower.contains("village") || lower.contains("村庄")) { subject = "village"; type = "structure"; }
-                else if (lower.contains("creeper") || lower.contains("苦力怕")) { subject = "creeper"; type = "danger"; }
-                else if (lower.contains("zombie") || lower.contains("僵尸")) { subject = "zombie"; type = "danger"; }
-                else if (lower.contains("tree") || lower.contains("树")) { subject = "tree"; type = "resource"; }
+                if (lower.contains("iron_ore")) { subject = "iron_ore"; type = "resource"; }
+                else if (lower.contains("coal")) { subject = "coal_ore"; type = "resource"; }
+                else if (lower.contains("diamond")) { subject = "diamond_ore"; type = "resource"; }
+                else if (lower.contains("gold")) { subject = "gold_ore"; type = "resource"; }
+                else if (lower.contains("cow")) { subject = "cow"; type = "entity"; }
+                else if (lower.contains("sheep")) { subject = "sheep"; type = "entity"; }
+                else if (lower.contains("village")) { subject = "village"; type = "structure"; }
+                else if (lower.contains("creeper")) { subject = "creeper"; type = "danger"; }
+                else if (lower.contains("zombie")) { subject = "zombie"; type = "danger"; }
+                else if (lower.contains("tree")) { subject = "tree"; type = "resource"; }
 
                 String dimension = companion.dimensionKey();
                 placeMemory.remember(type, subject, x, y, z, dimension,
@@ -1305,36 +1301,29 @@ public class AgentLoop {
         exposedExtraTools.clear();
         String intent = message == null ? "" : message.toLowerCase(Locale.ROOT);
         if (containsAny(intent, "give", "drop", "hand", "transfer", "store",
-                "retrieve", "给", "交给", "丢", "转移", "放入", "取出", "箱子")) {
+                "retrieve")) {
             exposeExtraTools(INVENTORY_EXTRA_TOOLS);
         }
-        if (containsAny(intent, "craft", "make", "smelt", "cook", "recipe",
-                "合成", "制作", "打造", "熔炼", "烧制", "配方")) {
+        if (containsAny(intent, "craft", "make", "smelt", "cook", "recipe")) {
             exposeExtraTools(GUI_EXTRA_TOOLS);
         }
-        if (containsAny(intent, "mine", "gather", "collect", "find", "resource",
-                "挖", "采集", "收集", "寻找", "资源", "矿", "木")) {
+        if (containsAny(intent, "mine", "gather", "collect", "find", "resource")) {
             exposeExtraTools(PERCEPTION_EXTRA_TOOLS);
         }
-        if (containsAny(intent, "fight", "attack", "defend", "kill", "combat",
-                "战斗", "攻击", "防御", "击杀", "怪物")) {
+        if (containsAny(intent, "fight", "attack", "defend", "kill", "combat")) {
             exposeExtraTools(COMBAT_EXTRA_TOOLS);
         }
-        if (containsAny(intent, "locate", "biome", "structure", "explore", "where",
-                "定位", "群系", "结构", "探索", "哪里")) {
+        if (containsAny(intent, "locate", "biome", "structure", "explore", "where")) {
             exposeExtraTools(LOCATION_EXTRA_TOOLS);
         }
-        if (containsAny(intent, "interact", "open", "inspect", "use", "click",
-                "交互", "打开", "检查", "使用", "点击")) {
+        if (containsAny(intent, "interact", "open", "inspect", "use", "click")) {
             exposeExtraTools(GUI_EXTRA_TOOLS);
             exposeExtraTools(Set.of("interact_entity"));
         }
-        if (containsAny(intent, "team", "teammate", "coordinate", "cooperate",
-                "团队", "队友", "协作", "合作")) {
+        if (containsAny(intent, "team", "teammate", "coordinate", "cooperate")) {
             exposeExtraTools(Set.of("coordinate_team"));
         }
-        if (containsAny(intent, "mod", "mechanism", "machine", "unknown", "experiment",
-                "模组", "机制", "机器", "陌生", "实验")) {
+        if (containsAny(intent, "mod", "mechanism", "machine", "unknown", "experiment")) {
             exposeExtraTools(Set.of("explore_mechanism"));
         }
         // Once an inspected unfamiliar object is relevant to the new goal,
@@ -1476,10 +1465,10 @@ public class AgentLoop {
         //     Only applied on the first round of a turn (roundNumber == 0)
         //     to avoid caching mid-tool-call sequences.
         //
-        //     安全门（防止记忆错乱/卡带式重复）：
-        //     1. 玩家最近 30 秒内说过话 → 不缓存（对话需要 LLM 真正理解）
-        //     2. 连续命中 ≥ 2 次 → 强制走 LLM（防止无限循环）
-        //     3. TTL 已缩短到 10 秒（降低情境变化风险）
+        //     Safety gates against confused memories and endless cached repetition:
+        //     1. Player spoke within 30 seconds -> no cache (conversation needs real understanding).
+        //     2. At least 2 consecutive hits -> force an LLM call to prevent loops.
+        //     3. TTL is shortened to 10 seconds to reduce risks from changing situations.
         if (DECISION_CACHE_ENABLED && roundNumber == 0 && !shouldSkipCache()) {
             String cacheKey = buildDecisionCacheKey();
             // buildDecisionCacheKey may return null (e.g. companion state
@@ -1578,7 +1567,7 @@ public class AgentLoop {
         //     status queries are highly reusable.
         //
         //     CRITICAL: Only cache responses that EXPLICITLY declare no
-        //     action via the [NO_ACTION] / 【无行动】 marker (see Action
+        //     action via the [NO_ACTION] marker (see Action
         //     Intent Declaration Protocol in system prompt). Responses
         //     without the marker are ambiguous — they might contain
         //     unstated action intent that would cause "say but don't do"
@@ -1605,8 +1594,8 @@ public class AgentLoop {
 
         // 4. Action Intent Declaration Protocol enforcement.
         //    When LLM produces a text-only response (no tool_calls), check
-        //    whether it explicitly declared "no action" via the [NO_ACTION] /
-        //    【无行动】 marker. If NOT, the LLM likely forgot to call a tool
+        //    whether it explicitly declared "no action" via the [NO_ACTION]
+        //    marker. If NOT, the LLM likely forgot to call a tool
         //    (or forgot to declare no-action) — give it ONE chance to
         //    correct itself by adding a system reminder.
         //
@@ -1633,15 +1622,15 @@ public class AgentLoop {
                         + truncateForLog(assistantMsg.content(), 80) + "\")");
                 synchronized (history) {
                     history.add(ChatMessage.system(
-                            "[SYSTEM] Action Intent Declaration Protocol 提醒\n"
-                            + "你的回复没有调用任何工具，也没有显式标注 [NO_ACTION] 或 【无行动】。\n"
-                            + "请立即做出选择：\n"
-                            + "  A. 如果你刚才说要做某事（移动/挖掘/建造/攻击/采集/合成/放置等），"
-                            + "必须立即调用对应工具执行（goto/auto_mine/build/craft 等）。\n"
-                            + "  B. 如果确实不需要任何身体动作（只是聊天/汇报/确认），"
-                            + "请在回复中添加 [NO_ACTION] 或 【无行动】 标记。\n"
-                            + "记住：说话≠行动。身体动作必须通过工具调用执行，"
-                            + "纯对话必须显式声明无行动。"));
+                            "[SYSTEM] Action Intent Declaration Protocol reminder\n"
+                            + "Your response called no tools and did not explicitly include [NO_ACTION].\n"
+                            + "Choose immediately:\n"
+                            + "  A. If you said you would act (move/mine/build/attack/collect/craft/place/etc.), "
+                            + "call the appropriate tool now (goto/auto_mine/build/craft/etc.).\n"
+                            + "  B. If no physical action is needed (only chat/report/acknowledgment), "
+                            + "include the [NO_ACTION] marker in your response.\n"
+                            + "Remember: talking is not acting. Physical actions require tool calls; "
+                            + "pure conversation must explicitly declare no action."));
                 }
                 // Give LLM another chance to call tools or declare no-action
                 callLLMAndHandleResponse(roundNumber + 1);
@@ -1711,11 +1700,11 @@ public class AgentLoop {
      *   <li>Skill library: register successful action sequences</li>
      * </ul>
      *
-     * <p><b>改进:</b>
+     * <p><b>Improvements:</b>
      * <ul>
-     *   <li>更准确的失败检测: 使用多信号融合而非简单关键词匹配</li>
-     *   <li>结构化错误分析: 提取错误类型和上下文</li>
-     *   <li>改进技能注册: 使用更稳定的技能ID生成策略</li>
+     *   <li>More accurate failure detection: combine multiple signals instead of simple keywords</li>
+     *   <li>Structured error analysis: extract the error type and context</li>
+     *   <li>Improved skill registration: generate more stable skill IDs</li>
      * </ul>
      */
     private void analyzeToolResults(List<ChatMessage.ToolCallRef> toolCalls,
@@ -1728,7 +1717,7 @@ public class AgentLoop {
         PlanGraph.PlanNode traceNode = planner.currentNode();
         String traceGoal = currentGoalContext(tracePlan, traceNode);
 
-        // 记录情绪变化前的 PAD 值，用于学习重要性
+        // Capture PAD values before emotional changes to learn event importance.
         float pleasureBefore = emotion.pleasure();
         float arousalBefore = emotion.arousal();
 
@@ -1738,7 +1727,7 @@ public class AgentLoop {
             String content = result.content();
             if (content == null) continue;
 
-            // 改进的失败检测：多信号融合
+            // Improved failure detection by combining multiple signals.
             FailureAnalysis analysis = analyzeFailure(content);
             boolean failed = analysis.isFailure();
             boolean succeeded = analysis.isSuccess();
@@ -1749,7 +1738,7 @@ public class AgentLoop {
                         new PendingSkillAction(currentTaskDescription(), tc));
             }
 
-            // 检查 LLM 是否在结果中标注了 importance 字段
+            // Check whether the LLM annotated an importance field in the result.
             String importanceLabel = extractImportanceLabel(content);
             if (importanceLabel != null) {
                 importance.learnFromLLMAnnotation(tc.name(), content, importanceLabel);
@@ -1758,7 +1747,7 @@ public class AgentLoop {
             if (failed) {
                 anyFailure = true;
                 failureCount++;
-                // 通过失败学习重要性
+                // Learn importance from failures.
                 importance.learnFromFailure(tc.name(), content);
                 // Record failure in reflection system (micro layer)
                 String taskDesc = planner.hasActivePlan() && planner.currentNode() != null
@@ -1776,14 +1765,14 @@ public class AgentLoop {
             }
         }
 
-        // Emotion feedback（基于成功/失败比例）
+        // Emotion feedback based on the balance of successes and failures.
         if (failureCount > successCount) {
             emotion.onTaskFailed();
         } else if (successCount > 0) {
             emotion.onTaskComplete();
         }
 
-        // 通过情绪变化学习重要性
+        // Learn importance from emotional changes.
         float pleasureDelta = Math.abs(emotion.pleasure() - pleasureBefore);
         float arousalDelta = Math.abs(emotion.arousal() - arousalBefore);
         float emotionDelta = Math.max(pleasureDelta, arousalDelta);
@@ -1791,15 +1780,15 @@ public class AgentLoop {
             var firstCall = toolCalls.get(0);
             var firstResult = toolResults.get(0);
             if (firstResult.content() != null) {
-                // 负面情绪（pleasure下降）传负值，让 ImportanceEvaluator 加权提升更多
+                // Negative emotion (falling pleasure) passes a negative delta so ImportanceEvaluator raises the weight more.
                 float signedDelta = emotion.pleasure() - pleasureBefore;
                 importance.learnFromEmotion(firstCall.name(), firstResult.content(), signedDelta);
             }
         }
 
-        // 改进的技能注册：使用更稳定的技能ID
+        // Improved skill registration with more stable skill IDs.
         if (anySuccess && !toolCalls.isEmpty()) {
-            // 收集所有成功的工具调用
+            // Collect all successful tool calls.
             List<ChatMessage.ToolCallRef> successfulCalls = new ArrayList<>();
             for (int i = 0; i < toolCalls.size() && i < toolResults.size(); i++) {
                 var tc = toolCalls.get(i);
@@ -1894,7 +1883,7 @@ public class AgentLoop {
     }
 
     /**
-     * 失败分析结果
+     * Failure analysis result.
      */
     private record FailureAnalysis(
             boolean isFailure,
@@ -1904,7 +1893,7 @@ public class AgentLoop {
     ) {}
 
     /**
-     * 分析工具结果，判断成功/失败（改进版：多信号融合）
+     * Analyze tool results for success or failure by combining multiple signals.
      */
     private FailureAnalysis analyzeFailure(String content) {
         if (content == null) {
@@ -1913,42 +1902,42 @@ public class AgentLoop {
 
         String lower = content.toLowerCase();
 
-        // 异步派发确认：async 任务刚刚派发，终态未知。
-        // 不计成功也不计失败 — 否则"派发成功"会被误记为"执行成功"，
-        // 污染技能库（记录了未验证的序列）和情绪反馈。
-        // 异步任务的真正成败由后续 task_finished 事件的结果记账。
+        // An async dispatch acknowledgment means the task just started; its terminal state is unknown.
+        // Count neither success nor failure: dispatch success must not be mistaken for execution success,
+        // which would pollute learned skills with unverified sequences and distort emotional feedback.
+        // The later task_finished event records the actual asynchronous outcome.
         boolean isAsyncDispatch = lower.contains("\"async\":true") ||
                                   lower.contains("\"async\":1");
 
-        // 成功信号（优先级高）
+        // Explicit success signals (high priority).
         boolean hasSuccessFlag = lower.contains("\"success\":true") ||
                                   lower.contains("\"success\":1") ||
                                   lower.contains("\"status\":\"success\"") ||
                                   lower.contains("\"result\":\"ok\"");
 
-        // 失败信号
+        // Failure signals.
         boolean hasErrorFlag = lower.contains("\"error\"") ||
                                 lower.contains("\"failed\"") ||
                                 lower.contains("\"status\":\"error\"") ||
                                 lower.contains("\"status\":\"failed\"");
 
-        // 超时信号
+        // Timeout signals.
         boolean hasTimeout = lower.contains("timed out") ||
                              lower.contains("timeout") ||
                              lower.contains("deadline exceeded");
 
-        // 未找到信号
+        // Missing-target signals.
         boolean hasNotFound = lower.contains("not found") ||
                                lower.contains("no such") ||
                                lower.contains("cannot find") ||
                                lower.contains("doesn't exist");
 
-        // 判断逻辑：
-        // 0. 如果是异步派发确认且无失败标志 → 状态未知（不算成功/失败）
-        // 1. 如果有明确成功标志且无失败标志 → 成功
-        // 2. 如果有失败标志 → 失败
-        // 3. 如果有超时/未找到且无成功标志 → 失败
-        // 4. 默认 → 成功（无明确失败信号时假设成功）
+        // Decision order:
+        // 0. Async dispatch acknowledgment without failure -> unknown (neither success nor failure).
+        // 1. Explicit success without a failure signal -> success.
+        // 2. Explicit failure signal -> failure.
+        // 3. Timeout or missing target without success -> failure.
+        // 4. Otherwise assume success when no explicit failure signal exists.
 
         if (isAsyncDispatch && !hasErrorFlag && !hasTimeout) {
             return new FailureAnalysis(false, false, "", "async_pending");
@@ -1965,19 +1954,19 @@ public class AgentLoop {
         }
 
         if (hasTimeout) {
-            return new FailureAnalysis(true, false, "操作超时", "timeout");
+            return new FailureAnalysis(true, false, "Operation timed out", "timeout");
         }
 
         if (hasNotFound && !hasSuccessFlag) {
-            return new FailureAnalysis(true, false, "未找到目标", "not_found");
+            return new FailureAnalysis(true, false, "Target not found", "not_found");
         }
 
-        // 默认成功
+        // Default to success.
         return new FailureAnalysis(false, true, "", "success");
     }
 
     /**
-     * 错误分类（通用模式，不依赖硬编码关键词）
+     * Categorize errors using general patterns rather than task-specific keywords.
      */
     private String categorizeError(String lowerContent) {
         if (lowerContent.contains("invalid") || lowerContent.contains("illegal") ||
@@ -1998,28 +1987,28 @@ public class AgentLoop {
     }
 
     /**
-     * 生成稳定的技能ID（含工具序列签名，避免不同任务互相覆盖）
+     * Generate stable skill IDs with a tool-sequence signature so different tasks do not overwrite one another.
      */
     private String generateSkillId(String taskDesc, String primaryTool, List<String> toolSequence) {
-        // 使用任务类型和工具名生成稳定的ID，避免hashCode冲突
+        // Use the task type and tool name to generate stable IDs and avoid hashCode collisions.
         String normalizedTask = taskDesc.toLowerCase()
                 .replaceAll("[^a-z0-9\\u4e00-\\u9fa5]", "_")
                 .replaceAll("_+", "_");
         if (normalizedTask.length() > 20) {
             normalizedTask = normalizedTask.substring(0, 20);
         }
-        // 工具序列签名：相同序列=相同技能（应合并统计），
-        // 不同序列=不同技能（不应互相覆盖）。
+        // Tool-sequence signature: identical sequences identify the same skill and merge statistics;
+        // different sequences identify different skills and must not overwrite one another.
         String seqSignature = String.join("->", toolSequence);
         String seqHash = Integer.toHexString(seqSignature.hashCode());
         return primaryTool + "_" + normalizedTask + "_" + seqHash;
     }
 
     /**
-     * 从工具结果 JSON 中提取 LLM 标注的 importance 字段。
-     * LLM 可在工具调用参数中包含 "importance": "high"/"medium"/"low"
-     * 来指导系统学习哪些事件重要。
-     * 返回 null 表示未标注。
+     * Extract the LLM-annotated importance field from a tool-result JSON object.
+     * The LLM may include "importance": "high"/"medium"/"low" in tool-call arguments
+     * to teach the system which events matter.
+     * Returns null when no annotation is present.
      */
     private static String extractImportanceLabel(String jsonContent) {
         if (jsonContent == null) return null;
@@ -2287,7 +2276,7 @@ public class AgentLoop {
     private boolean complexStructuredOutputLikely() {
         String goal = activeOwnerGoal == null ? "" : activeOwnerGoal.toLowerCase(Locale.ROOT);
         return containsAny(goal, "build", "blueprint", "structure", "architect",
-                "construction", "建造", "建筑", "蓝图", "结构");
+                "construction");
     }
 
     /** Sleep in short slices so a new owner event or cancel wakes the loop logically. */
@@ -2394,7 +2383,7 @@ public class AgentLoop {
             if (start > 1) {
                 String summary = summarizeOldMessages(1, start);
                 if (!summary.isBlank()) {
-                    trimmed.add(ChatMessage.system("[过往对话摘要] " + summary));
+                    trimmed.add(ChatMessage.system("[SUMMARY] " + summary));
                 }
             }
 
@@ -2443,7 +2432,7 @@ public class AgentLoop {
         trimmed.add(systemPrompt);
         if (start > 1) {
             String summary = summarizeOldMessages(1, start);
-            if (!summary.isBlank()) trimmed.add(ChatMessage.system("[过往对话摘要] " + summary));
+            if (!summary.isBlank()) trimmed.add(ChatMessage.system("[SUMMARY] " + summary));
         }
         int keptPrefix = trimmed.size();
         // Keep the complete recent range, including any unsent suffix. Do not
@@ -2467,9 +2456,9 @@ public class AgentLoop {
      * Extracts only the essential info: what tools were called, what the
      * outcomes were, and any key decisions. Each message becomes ~1 line.
      *
-     * <p><b>记忆保护</b>：玩家指令保留前 200 字符（而非 80），确保
-     * 重要任务指令不被截断。检测到的重要事件（死亡/钻石/危险）会
-     * 标记为【重要】以便 LLM 优先关注。
+     * <p><b>Memory protection:</b> retain the first 200 characters of player instructions rather than 80,
+     * so important task requirements are not cut off. Important events such as death, diamonds or danger
+     * receive an [IMPORTANT] marker to direct the LLM's attention.
      *
      * @param fromIndex inclusive start index in history
      * @param toIndex exclusive end index in history
@@ -2488,13 +2477,13 @@ public class AgentLoop {
             // Skip empty content (e.g. assistant messages with only tool_calls)
             if (content.isBlank() && m.toolCalls() == null) continue;
 
-            // 动态重要性评估：用 ImportanceEvaluator 取代硬编码关键词
-            // 玩家指令始终视为重要（用户说的话都不能丢）
+            // Evaluate importance dynamically with ImportanceEvaluator instead of hardcoded keywords.
+            // Player instructions are always important: never discard what the user said.
             boolean important = false;
             if ("user".equals(role)) {
                 important = true;
             } else if ("tool".equals(role) && i > 0) {
-                // 查找对应的工具名
+                // Find the corresponding tool name.
                 String toolName = findToolNameForResult(history, i);
                 important = importance.isImportant(toolName, content);
             } else {
@@ -2502,9 +2491,9 @@ public class AgentLoop {
             }
 
             if ("user".equals(role)) {
-                // 玩家指令：保留前 200 字符（不是 80），防止任务指令被截断
+                // Keep 200 characters of player instructions, not 80, to preserve task requirements.
                 String snippet = content.length() > 200 ? content.substring(0, 200) + "..." : content;
-                sb.append("玩家: ").append(snippet).append("; ");
+                sb.append("Player: ").append(snippet).append("; ");
                 count++;
             } else if ("assistant".equals(role)) {
                 // Assistant: if has tool_calls, list tool names; else first 100 chars of text
@@ -2514,32 +2503,32 @@ public class AgentLoop {
                         if (tools.length() > 0) tools.append(",");
                         tools.append(tc.name());
                     }
-                    sb.append("AI调用[").append(tools).append("]; ");
+                    sb.append("AI calls[").append(tools).append("]; ");
                 } else if (!content.isBlank()) {
                     String snippet = content.length() > 100 ? content.substring(0, 100) + "..." : content;
                     sb.append("AI: ").append(snippet).append("; ");
                 }
                 count++;
             } else if ("tool".equals(role)) {
-                // Tool result: note success/error + 是否包含重要信息
+                // Tool result: note success/error and whether important information is present.
                 String lower = content.toLowerCase();
                 if (lower.contains("error") || lower.contains("failed")) {
-                    sb.append("(失败); ");
+                    sb.append("(failed); ");
                 } else if (important) {
-                    sb.append("(成功★); ");
+                    sb.append("(success*); ");
                 } else {
-                    sb.append("(成功); ");
+                    sb.append("(success); ");
                 }
                 count++;
             } else if ("system".equals(role)) {
                 // System messages: preserve accumulated summary from previous
                 // trimHistory passes, and keep important body-log events.
-                if (content.startsWith("[过往对话摘要]")) {
+                if (content.startsWith("[SUMMARY]")) {
                     // Accumulate the previous summary instead of discarding it.
                     // Without this branch, every trim would drop the prior
                     // summary and the LLM would lose ALL memory older than the
                     // recent window — a slow memory leak of long-term context.
-                    // Extract everything after the "[过往对话摘要]" tag.
+                    // Extract everything after the "[SUMMARY]" tag.
                     int bracketEnd = content.indexOf(']');
                     String prevSummary = bracketEnd >= 0 && bracketEnd + 1 < content.length()
                             ? content.substring(bracketEnd + 1).trim() : "";
@@ -2550,18 +2539,18 @@ public class AgentLoop {
                 } else if (content.startsWith("[EVENTS]") && important) {
                     // Body log events: skip transient ones, but keep important
                     String snippet = content.length() > 80 ? content.substring(0, 80) + "..." : content;
-                    sb.append("[事件] ").append(snippet).append("; ");
+                    sb.append("[EVENT] ").append(snippet).append("; ");
                     count++;
                 }
                 continue;
             }
 
-            // 重要事件追加标记
+            // Mark important events.
             if (important && sb.length() > 0) {
-                // 在最后一个分号前插入★标记
+                // Insert the importance marker before the last semicolon.
                 int lastSemi = sb.lastIndexOf("; ");
                 if (lastSemi >= 0) {
-                    sb.insert(lastSemi, "【重要】");
+                    sb.insert(lastSemi, "[IMPORTANT]");
                 }
             }
         }
@@ -2577,15 +2566,15 @@ public class AgentLoop {
     }
 
     /**
-     * 为工具结果消息查找对应的工具名。
-     * 向上查找最近的带 tool_calls 的 assistant 消息，匹配 toolCallId。
+     * Find the tool name corresponding to a tool-result message.
+     * Search backward for assistant tool_calls with a matching toolCallId.
      */
     private static String findToolNameForResult(List<ChatMessage> history, int resultIndex) {
         if (resultIndex <= 0 || resultIndex >= history.size()) return "unknown";
         ChatMessage result = history.get(resultIndex);
         String resultId = result.toolCallId();
         if (resultId == null) return "unknown";
-        // 向上查找匹配的 assistant tool_calls
+        // Search backward for matching assistant tool_calls.
         for (int i = resultIndex - 1; i >= 0; i--) {
             ChatMessage m = history.get(i);
             if (m.toolCalls() == null) continue;
@@ -2693,7 +2682,7 @@ public class AgentLoop {
     private static boolean isExplicitTeamMessage(String text) {
         if (text == null) return false;
         String value = text.stripLeading();
-        return value.startsWith("[TEAM]") || value.startsWith("【团队】");
+        return value.startsWith("[TEAM]");
     }
 
     // ── Tool execution ─────────────────────────────────────────────
@@ -2981,11 +2970,11 @@ public class AgentLoop {
                                 : "{\"success\":true}";
                     }
                     // Truncate long tool results to keep the conversation compact.
-                    // 截断长度根据工具类型差异化：
-                    // - look_around/scan: 1200 字符（需要看到周围环境，不能太短）
-                    // - status/inventory: 600 字符（中等）
-                    // - 其他: 800 字符（默认）
-                    // 危险信息优先保留。
+                    // Adjust the truncation limit by tool type:
+                    // - look_around/scan: preserve enough surrounding context (scan defaults to 1200 characters).
+                    // - status/inventory: 600 characters (medium).
+                    // - other tools: 800 characters by default.
+                    // Prioritize dangerous information when retaining content.
                     int maxChars = getToolResultLimit(exec.toolName());
                     String truncated = truncateToolResult(rawResult, maxChars, exec.toolName());
                     resultsById.put(exec.toolCallId(),
@@ -3051,8 +3040,8 @@ public class AgentLoop {
     }
 
     /**
-     * 根据工具名获取结果截断长度。
-     * 感知类工具（look_around）需要更长，简单动作类可以更短。
+     * Get the result truncation limit for a tool name.
+     * Perception tools such as look_around need more room than simple action tools.
      */
     private static int getToolResultLimit(String toolName) {
         if (toolName == null) return 800;
@@ -3072,28 +3061,28 @@ public class AgentLoop {
         if (lower.contains("inspect_gui") || lower.contains("inspect_block_storage")) {
             return 9000;
         }
-        // 感知类：需要完整环境信息，给 1200 字符
+        // Perception: allow 1200 characters for environmental context.
         if (lower.contains("look") || lower.contains("scan")
                 || lower.contains("search") || lower.contains("find")) {
             return 1200;
         }
-        // 状态类：中等长度，600 字符
+        // Status: medium length, 600 characters.
         if (lower.contains("status") || lower.contains("inventory")
                 || lower.contains("health") || lower.contains("check")) {
             return 600;
         }
-        // 默认：800 字符
+        // Default: 800 characters.
         return 800;
     }
 
     /**
      * Truncate a tool result string to a maximum length.
      *
-     * <p><b>安全截断</b>：先尝试在截断点找最后一个完整的 JSON 对象/数组
-     * 元素并正确闭合结构，再用 {@link com.google.gson.JsonParser} 校验。
-     * 如果修复后仍不是合法 JSON（嵌套过深、字符串内含截断点等），
-     * 回退到纯文本 "结果过长已截断: ..." —— 纯文本虽然不是 JSON，但
-     * 至少不会让 LLM 解析失败或产生幻觉字段。
+     * <p><b>Safe truncation:</b> first try ending at the last complete JSON object/array
+     * element, close the structure, and validate it with {@link com.google.gson.JsonParser}.
+     * If the repair is still invalid (deep nesting, a cut inside a string, etc.),
+     * fall back to plain text "Result too long; truncated: ...". Plain text is not JSON,
+     * but avoids malformed JSON that could cause parsing errors or hallucinated fields.
      *
      * @param result raw tool result
      * @param maxChars maximum characters to keep
@@ -3103,55 +3092,55 @@ public class AgentLoop {
     private String truncateToolResult(String result, int maxChars, String toolName) {
         if (result == null || result.length() <= maxChars) return result;
 
-        // 动态重要性评估：用 ImportanceEvaluator 判断是否需要保留重要片段
-        // 如果整个结果被判定为重要，给更多空间（1.3倍）
+        // Use ImportanceEvaluator to decide whether important content needs extra space.
+        // Give a result judged important 1.3 times the normal room.
         boolean isImportant = importance.isImportant(toolName, result);
         if (isImportant) {
-            maxChars = (int)(maxChars * 1.3);  // 重要结果多保留30%
+            maxChars = (int)(maxChars * 1.3);  // Retain 30% more of an important result.
         }
 
         String truncated = result.substring(0, Math.min(maxChars, result.length()));
 
-        // 尝试产生合法 JSON：在截断点找最后一个完整元素，闭合结构，
-        // 并追加 "truncated":true 标记。校验通过才采用。
+        // Try valid JSON: end at the last complete element, close the structure,
+        // and append "truncated":true. Use it only if validation succeeds.
         String repaired = tryRepairJsonTruncation(truncated, maxChars);
         if (repaired != null) {
             return repaired;
         }
-        // 回退：纯文本。LLM 仍能读懂内容，只是无法当 JSON 解析。
-        // 这比发出畸形 JSON（导致解析错误或幻觉字段）安全得多。
-        return "结果过长已截断 (原始长度=" + result.length() + " 字符): " + truncated;
+        // Fall back to plain text, which remains readable even though it cannot be parsed as JSON.
+        // This is safer than malformed JSON that leads to parsing errors or hallucinated fields.
+        return "Result too long; truncated (original length=" + result.length() + " characters): " + truncated;
     }
 
     /**
-     * 尝试把截断后的字符串修复为合法 JSON。
+     * Try to repair a truncated string into valid JSON.
      *
-     * <p>策略：
+     * <p>Strategy:
      * <ul>
-     *   <li>对象 ({...})：找最后一个 "}," 截断点，保留到该处，追加
-     *       "truncated":true 并闭合 }。</li>
-     *   <li>数组 ([...])：找最后一个 "}," 截断点，保留到该处，追加
-     *       {"truncated":true} 并闭合 ]。</li>
-     *   <li>非 JSON（纯文本）：直接追加截断标记。</li>
+     *   <li>Object ({...}): keep through the last "}," boundary, append
+     *       "truncated":true, and close }.</li>
+     *   <li>Array ([...]): keep through the last "}," boundary, append
+     *       {"truncated":true}, and close ].</li>
+     *   <li>Non-JSON plain text: append a truncation marker directly.</li>
      * </ul>
-     * 每个候选都用 JsonParser 校验，失败则返回 null 让调用方回退到纯文本。
+     * Validate every candidate with JsonParser; return null on failure so the caller can use plain text.
      */
     private static String tryRepairJsonTruncation(String truncated, int maxChars) {
         String trimmed = truncated.trim();
         try {
             if (trimmed.startsWith("{")) {
-                // 对象：优先在最后一个完整字段后截断
+                // Object: prefer truncating after the last complete field.
                 int lastComplete = truncated.lastIndexOf("},");
                 if (lastComplete > maxChars / 2) {
                     String candidate = truncated.substring(0, lastComplete + 1)
                             + "\"truncated\":true}";
                     if (isValidJson(candidate)) return candidate;
                 }
-                // 直接闭合对象
+                // Try closing the object directly.
                 String candidate = truncated + ",\"truncated\":true}";
                 if (isValidJson(candidate)) return candidate;
             } else if (trimmed.startsWith("[")) {
-                // 数组：优先在最后一个完整元素后截断
+                // Array: prefer truncating after the last complete element.
                 int lastComplete = truncated.lastIndexOf("},");
                 if (lastComplete > maxChars / 2) {
                     String candidate = truncated.substring(0, lastComplete + 1)
@@ -3161,16 +3150,16 @@ public class AgentLoop {
                 String candidate = truncated + ",{\"truncated\":true}]";
                 if (isValidJson(candidate)) return candidate;
             } else {
-                // 非 JSON 纯文本：追加截断标记即可
-                return truncated + "...[已截断]";
+                // Non-JSON plain text only needs a truncation marker.
+                return truncated + "...[truncated]";
             }
         } catch (Exception e) {
-            // 任何异常都回退到纯文本
+            // Any exception falls back to plain text.
         }
         return null;
     }
 
-    /** 用 Gson 校验字符串是否为合法 JSON。 */
+    /** Validate a JSON string with Gson. */
     private static boolean isValidJson(String s) {
         try {
             com.google.gson.JsonParser.parseString(s);
@@ -3225,7 +3214,7 @@ public class AgentLoop {
 
     /** HTTP deadline is bounded per reasoning round so stale requests can be cancelled. */
     private static long providerDeadlineSeconds(int roundNumber) {
-        return roundNumber <= 0 ? 120L : 90L;
+        return LLMRequest.DEFAULT_DEADLINE.getSeconds();
     }
 
     /** Track the last owner command for cache keying. */
@@ -3234,33 +3223,33 @@ public class AgentLoop {
     /** Full active owner objective used for memory retrieval and skill naming. */
     private volatile String activeOwnerGoal = "";
 
-    /** 上次玩家消息的时间戳（用于决策缓存安全门）。 */
+    /** Timestamp of the last player message, used by decision-cache safety gates. */
     private volatile long lastOwnerMessageTime = 0;
 
-    /** 连续缓存命中次数（达到上限后强制走 LLM）。 */
+    /** Consecutive cache hits; reaching the limit forces an LLM call. */
     private int consecutiveCacheHits = 0;
 
-    /** 当前回合内的补救次数（防止无限递归）。每个 turn 开始时重置。 */
+    /** Remediation attempts this turn, reset at each turn start to bound recursion. */
     private int remediationRoundCounter = 0;
 
     /**
-     * 决策缓存安全门 — 判断当前是否应跳过缓存。
+     * Decision-cache safety gate: determine whether to skip cached decisions now.
      *
-     * <p>跳过缓存的场景：
+     * <p>Skip the cache when:
      * <ul>
-     *   <li>玩家最近 30 秒内说过话（对话需要 LLM 真正理解，不能复用）</li>
-     *   <li>连续缓存命中已达上限（防止"卡带"式无限循环）</li>
+     *   <li>The player spoke in the last 30 seconds (conversation needs fresh understanding)</li>
+     *   <li>Consecutive cache hits reached the limit (prevent endless replay loops)</li>
      * </ul>
      */
     private boolean shouldSkipCache() {
-        // 1. 玩家最近说过话 → 不缓存
+        // 1. Recent player speech disables caching.
         if (lastOwnerMessageTime > 0) {
             long elapsed = System.currentTimeMillis() - lastOwnerMessageTime;
             if (elapsed < CACHE_SKIP_AFTER_PLAYER_MSG_MS) {
                 return true;
             }
         }
-        // 2. 连续命中已达上限 → 强制走 LLM
+        // 2. Reaching the consecutive-hit limit forces an LLM call.
         if (consecutiveCacheHits >= MAX_CONSECUTIVE_CACHE_HITS) {
             return true;
         }
@@ -3268,47 +3257,43 @@ public class AgentLoop {
     }
 
     /**
-     * 检查 LLM 响应是否显式声明了"无行动"标记。
+     * Check whether the LLM response explicitly declares a no-action marker.
      *
-     * <p>基于 NLT (Natural Language Tools, arxiv 2510.14453) 和 Reflexion
-     * 的 "explicit intent declaration" 模式。系统不再通过脆弱的关键词列表
-     * 猜测文本是否包含行动意图，而是要求 LLM 在不需要执行任何身体动作时
-     * 显式标注 [NO_ACTION] 或 【无行动】 标记。
+     * <p>Based on the explicit intent declaration pattern from NLT
+     * (Natural Language Tools, arxiv 2510.14453) and Reflexion. Rather than guessing
+     * action intent with fragile keyword lists, require the LLM to explicitly include
+     * [NO_ACTION] whenever no physical action is needed.
      *
-     * <p>这完全替代了之前的 containsActionIntent() 关键词列表方法：
+     * <p>This fully replaces the old containsActionIntent() keyword approach:
      * <ul>
-     *   <li>多语言无关：标记本身是结构化的，不依赖任何语言的关键词</li>
-     *   <li>LLM 自主判断：由 LLM 自己决定是否需要行动，而非系统猜测</li>
-     *   <li>无遗漏：只要 LLM 遵守协议，所有"只说不做"的情况都能被捕获</li>
-     *   <li>零维护：无需随场景变化更新关键词列表</li>
+     *   <li>Language-independent: the structured marker needs no language-specific keywords</li>
+     *   <li>LLM judgment: the LLM decides whether to act rather than leaving the system to guess</li>
+     *   <li>No omissions: protocol-compliant responses expose every "say but do not act" case</li>
+     *   <li>No maintenance: scenario changes do not require keyword-list updates</li>
      * </ul>
      *
-     * <p>用法：当 LLM 返回纯文本响应（无 tool_calls）时：
+     * <p>For a text-only LLM response (no tool_calls):
      * <ul>
-     *   <li>有标记 → LLM 明确声明无行动 → 结束回合，可缓存</li>
-     *   <li>无标记 → LLM 可能漏掉了工具调用 → 触发补救机制</li>
+     *   <li>Marker present -> explicit no-action declaration -> end the turn; caching is allowed</li>
+     *   <li>Marker absent -> a tool call may be missing -> trigger remediation</li>
      * </ul>
      *
-     * @param text LLM 响应文本
-     * @return true 如果文本包含显式无行动标记
+     * @param text LLM response text
+     * @return true if the response contains an explicit no-action marker
      */
     private static boolean hasExplicitNoActionMarker(String text) {
         if (text == null || text.isBlank()) return false;
-        // 接受中英文多种标记形式（LLM 可能用任意一种，标记可在文本任意位置）
-        // 故意接受多种变体以提高鲁棒性：
-        // - [NO_ACTION] / 【无行动】 是系统提示词中明示的两种主标记
-        // - (无行动) / [无行动] / （NO_ACTION） 是常见输入变体，作为容错
+        // Accept explicit English marker variants anywhere in the response.
+        // Keep the canonical [NO_ACTION] protocol and tolerate common formatting variants:
+        // (NO_ACTION) and [NO ACTION] remain explicit rather than matching ordinary prose.
         return text.contains("[NO_ACTION]")
-            || text.contains("【无行动】")
-            || text.contains("(无行动)")
-            || text.contains("（无行动）")
-            || text.contains("[无行动]")
-            || text.contains("（NO_ACTION）");
+                || text.contains("(NO_ACTION)")
+                || text.contains("[NO ACTION]");
     }
 
     /**
-     * 将文本截断到指定长度用于日志输出。
-     * 超长部分用 "..." 替代，并移除换行符避免日志污染。
+     * Truncate text to the requested length for logging.
+     * Replace excess content with "..." and remove newlines to avoid log pollution.
      */
     private static String truncateForLog(String text, int maxLen) {
         if (text == null) return "";
@@ -3318,8 +3303,8 @@ public class AgentLoop {
     }
 
     /**
-     * 检查给定文本是否与 history 中最后一条 assistant 消息相同。
-     * 用于防止缓存命中时回放与上次完全相同的回复（"卡带"循环）。
+     * Check whether text matches the last assistant message in history.
+     * Prevent cache hits from replaying the identical response in an endless loop.
      */
     private boolean isSameAsLastAssistant(String text) {
         if (text == null) return false;
@@ -3544,17 +3529,17 @@ public class AgentLoop {
         sb.append("2. **No-action response**: You have NO physical action to perform ");
         sb.append("this turn (pure conversation, status report, waiting, ");
         sb.append("acknowledgment). In this case, you MUST include the marker ");
-        sb.append("`[NO_ACTION]` or `【无行动】` somewhere in your text response.\n\n");
+        sb.append("`[NO_ACTION]` somewhere in your text response.\n\n");
         sb.append("**Why this matters**: If you produce text without tool calls ");
         sb.append("AND without the marker, the system will assume you FORGOT to ");
         sb.append("call a tool and will give you one reminder. This wastes time ");
         sb.append("and tokens. Use the marker to clearly say 'I have considered ");
         sb.append("it, and no physical action is needed right now.'\n\n");
         sb.append("**Examples**:\n");
-        sb.append("- Action: call `goto` + text '我去看看那边' → OK\n");
-        sb.append("- No-action: '好的，我明白了。【无行动】' → OK\n");
+        sb.append("- Action: call `goto` + text 'I will check over there' -> OK\n");
+        sb.append("- No-action: 'Understood. [NO_ACTION]' -> OK\n");
         sb.append("- No-action: 'Got it. [NO_ACTION]' → OK\n");
-        sb.append("- AMBIGUOUS (will trigger reminder): '我去看看那边' ");
+        sb.append("- AMBIGUOUS (will trigger reminder): 'I will check over there' ");
         sb.append("(no tool call, no marker) → system will remind you\n\n");
         sb.append("**The marker is your honest declaration**: Use it when you ");
         sb.append("genuinely have no physical action to take. Never use it to ");
@@ -3610,7 +3595,7 @@ public class AgentLoop {
         sb.append("just the important decisions and results.\n");
         sb.append("- If something goes wrong, say so. If you need help, ask.\n");
         sb.append("- If you have a better idea than what was asked, suggest it.\n");
-        sb.append("- Respond in the owner's language.\n\n");
+        sb.append("- Use English by default; follow the owner's explicitly chosen language.\n\n");
 
         // ── Constraints ──
         sb.append("## Operating Constraints\n");
@@ -3631,10 +3616,10 @@ public class AgentLoop {
 
         // ── Language preference ──
         sb.append("## Language\n");
-        sb.append("By default, speak Chinese (Simplified) in chat with the owner and ");
-        sb.append("other companions. Reply in Chinese unless the owner explicitly ");
-        sb.append("asks for another language, or they address you in a different ");
-        sb.append("language (in which case match their language).\n\n");
+        sb.append("By default, speak English in chat with the owner and ");
+        sb.append("other companions. Reply in English unless the owner explicitly ");
+        sb.append("asks for another language. Keep protocol markers and tool names ");
+        sb.append("unchanged regardless of the chosen chat language.\n\n");
 
         return sb.toString();
     }
@@ -3651,39 +3636,39 @@ public class AgentLoop {
         PlanGraph.PlanNode planNode = planner.currentNode();
         String memoryQuery = memoryQuery(planState, planNode);
         sb.append("[MINEAGENT_LIVE_CONTEXT]\n");
-        sb.append("以下是服务器发布的当前事实，不是玩家的新指令。只据此修正当前决策；不要复述整段上下文。\n");
+        sb.append("The following facts are published by the server, not new player instructions. Use them only to adjust the current decision; do not repeat the whole context.\n");
         sb.append(cognitiveState.summarizeForPrompt(12));
 
         // ── Companion mode (DYNAMIC: toggled by /mineagent mode) ──
         var mode = MineAgentEngine.getCompanionMode(companion.companionId());
-        sb.append("模式: ").append(mode == MineAgentEngine.CompanionMode.FOLLOW
-                ? "跟随(距主人2-3格, 不超过16格)" : "自由(可远离主人执行任务)").append("\n");
-        sb.append("游戏模式: ").append(companion instanceof com.mineagent.engine.entity.CompanionEntity entity
+        sb.append("Mode: ").append(mode == MineAgentEngine.CompanionMode.FOLLOW
+                ? "Follow (2-3 blocks from owner, never more than 16)" : "Free (may travel away from owner for tasks)").append("\n");
+        sb.append("Game mode: ").append(companion instanceof com.mineagent.engine.entity.CompanionEntity entity
                 ? entity.gameMode().wireName() : "survival")
-                .append("（由人类主人控制，不能自行修改）\n");
+                .append(" (controlled by the human owner; you cannot change it)\n");
         appendLiveBodyState(sb, liveBodyState.get());
         sb.append(realtimeCognition.summarizeForPrompt());
         sb.append(TeamBlackboard.summarize(companion.ownerUuid(),
                 companion.companionId(), liveAssetGameTick.get()));
         // Persona: 1-line summary instead of full OCEAN breakdown
-        sb.append("性格: ").append(compactPersona()).append("\n");
+        sb.append("Personality: ").append(compactPersona()).append("\n");
         // Emotion: 1-line label instead of full PAD breakdown
-        sb.append("情绪: ").append(emotion.label())
-                .append(String.format(" (愉%.0f%% 活%.0f%% 控%.0f%%)\n",
+        sb.append("Emotion: ").append(emotion.label())
+                .append(String.format(" (pleasure %.0f%% arousal %.0f%% dominance %.0f%%)\n",
                         (emotion.pleasure() + 1) * 50,
                         (emotion.arousal() + 1) * 50,
                         (emotion.dominance() + 1) * 50));
         // Theory of Mind: 1-line intent
-        sb.append("玩家").append(theoryOfMind.currentIntent().desc());
-        if (theoryOfMind.urgency() > 0.6f) sb.append("(赶时间!)");
-        sb.append(String.format(", 信任度%.0f%%\n", theoryOfMind.playerTrust() * 100));
+        sb.append("Player ").append(theoryOfMind.currentIntent().desc());
+        if (theoryOfMind.urgency() > 0.6f) sb.append(" (in a hurry!)");
+        sb.append(String.format(", trust %.0f%%\n", theoryOfMind.playerTrust() * 100));
         // Retrieve locations against the newest objective, not merely by
         // global importance. This prevents unrelated old POIs from crowding
         // out a remembered facility or resource needed by the current goal.
         sb.append(compactPlaceMemory(memoryQuery, 3));
         // Skills: only count, not full list
         if (skillLib.size() > 0) {
-            sb.append("已掌握技能: ").append(skillLib.size()).append("个\n");
+            sb.append("Mastered skills: ").append(skillLib.size()).append("\n");
         }
         sb.append(rollingPlanner.summarizeForPrompt());
         sb.append(skillRuntime.summarizeForPrompt());
@@ -3713,7 +3698,7 @@ public class AgentLoop {
                     ? lessons.substring(firstDash, secondDash)
                     : (firstDash >= 0 ? lessons.substring(firstDash) : "");
             if (!firstLesson.isBlank()) {
-                sb.append("教训: ").append(firstLesson.substring(2)).append("\n");
+                sb.append("Lesson: ").append(firstLesson.substring(2)).append("\n");
             }
         }
         // Failed-task memory (JARVIS-1 style): inject relevant past failures
@@ -3725,15 +3710,15 @@ public class AgentLoop {
             if (!failures.isBlank()) {
                 // Compress: only the lesson lines, not the full format
                 // (the full format has headers and task descriptions that
-                // would bloat the prompt). Extract just the "教训:" lines.
-                StringBuilder failSb = new StringBuilder("失败记忆:\n");
+                // would bloat the prompt). Extract just the "Lesson:" lines.
+                StringBuilder failSb = new StringBuilder("Failure memories:\n");
                 for (String line : failures.split("\n")) {
                     String trimmed = line.trim();
-                    if (trimmed.startsWith("教训:") || trimmed.startsWith("失败原因:")) {
+                    if (trimmed.startsWith("Lesson:") || trimmed.startsWith("Failure reason:")) {
                         failSb.append(trimmed).append(" ");
                     }
                 }
-                if (failSb.length() > "失败记忆:\n".length()) {
+                if (failSb.length() > "Failure memories:\n".length()) {
                     sb.append(failSb.toString().trim()).append("\n");
                 }
             }
@@ -3746,7 +3731,7 @@ public class AgentLoop {
         if (!spatialMemory.isBlank()) {
             sb.append(spatialMemory);
         }
-        // ImportanceEvaluator: 动态学习到的重要性（非硬编码）
+        // ImportanceEvaluator: dynamically learned importance rather than hardcoded weights.
         String learned = importance.summarizeForPrompt();
         if (!learned.isBlank()) {
             sb.append(learned).append("\n");
@@ -3815,25 +3800,25 @@ public class AgentLoop {
         String[] traits = persona.traits();
         if (traits.length > 0) sb.append(traits[0]);
         // Add dominant tendency
-        if (persona.openness() > 0.6f) sb.append(", 爱探索");
-        if (persona.conscientiousness() > 0.6f) sb.append(", 有条理");
-        if (persona.extraversion() > 0.6f) sb.append(", 话多");
-        else if (persona.extraversion() < 0.3f) sb.append(", 安静");
-        if (persona.neuroticism() > 0.6f) sb.append(", 胆小");
-        if (persona.agreeableness() > 0.6f) sb.append(", 合作");
+        if (persona.openness() > 0.6f) sb.append(", curious");
+        if (persona.conscientiousness() > 0.6f) sb.append(", organized");
+        if (persona.extraversion() > 0.6f) sb.append(", talkative");
+        else if (persona.extraversion() < 0.3f) sb.append(", quiet");
+        if (persona.neuroticism() > 0.6f) sb.append(", timid");
+        if (persona.agreeableness() > 0.6f) sb.append(", cooperative");
         return sb.toString();
     }
 
     /** Compact place memory: only the N most recent unique subjects. */
     private String compactPlaceMemory(String query, int max) {
         var summary = placeMemory.summarizeForPrompt(query, max);
-        if (summary == null || summary.isBlank() || summary.startsWith("（暂无")) {
+        if (summary == null || summary.isBlank() || summary.startsWith("(No ")) {
             metrics.recordMemoryQuery(false);
-            return "位置记忆: (无)\n";
+            return "Location memory: (None)\n";
         }
         metrics.recordMemoryQuery(true);
         // Extract lines starting with "- " and take first `max`
-        StringBuilder sb = new StringBuilder("位置记忆:\n");
+        StringBuilder sb = new StringBuilder("Location memory:\n");
         int count = 0;
         int idx = 0;
         while (count < max && idx < summary.length()) {

@@ -9,36 +9,36 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 /**
- * Reflection 反思系统 — 从失败中提取教训，指导未来决策。
+ * Reflection system — extracts lessons from failures to guide future decisions.
  *
- * <p>受启于 Reflexion (NeurIPS 2023) 和 Voyager 的自我改进机制：
- * 不是简单地记录"失败了"，而是分析"为什么失败"并生成可操作的教训。
+ * <p>Inspired by self-improvement in Reflexion (NeurIPS 2023) and Voyager:
+ * rather than merely record failure, analyze why it happened and produce actionable lessons.
  *
- * <p>三层次反思：
+ * <p>Three reflection levels:
  * <ul>
- *   <li><b>Micro</b>：单次工具调用失败 → 参数修正建议</li>
- *   <li><b>Meso</b>：任务级别失败 → 策略调整建议</li>
- *   <li><b>Macro</b>：行为模式失败 → 决策风格调整</li>
+ *   <li><b>Micro</b>: individual tool-call failure → parameter correction suggestions</li>
+ *   <li><b>Meso</b>: task failure → strategy adjustment suggestions</li>
+ *   <li><b>Macro</b>: repeated behavioral failure → decision-style adjustments</li>
  * </ul>
  *
- * <p><b>改进:</b>
+ * <p><b>Improvements:</b>
  * <ul>
- *   <li>移除硬编码关键词: 使用通用模式匹配，不依赖特定词汇</li>
- *   <li>改进失败分类: 基于错误结构而非关键词</li>
- *   <li>动态教训生成: 根据错误上下文生成针对性建议</li>
+ *   <li>Replace hardcoded keywords with general pattern matching</li>
+ *   <li>Classify failures by error structure rather than specific vocabulary</li>
+ *   <li>Generate targeted lessons dynamically from error context</li>
  * </ul>
  */
 public class ReflectionSystem {
 
     /**
-     * 一条反思记录。
+     * A reflection record.
      *
-     * @param level      反思级别（micro/meso/macro）
-     * @param trigger    触发原因（失败的工具/任务描述）
-     * @param context    失败时的上下文摘要
-     * @param lesson     提取的教训
-     * @param timestamp  记录时间
-     * @param applicability 适用范围（哪些场景适用此教训）
+     * @param level reflection level (micro/meso/macro)
+     * @param trigger cause (failed tool or task description)
+     * @param context summary of the context at failure
+     * @param lesson extracted lesson
+     * @param timestamp record time
+     * @param applicability situations where this lesson applies
      */
     public record Reflection(
             String level,
@@ -49,7 +49,7 @@ public class ReflectionSystem {
             String applicability
     ) {}
 
-    /** 默认最大反思条数 */
+    /** Default maximum number of reflections */
     private static final int DEFAULT_MAX_REFLECTIONS = 30;
 
     private final Deque<Reflection> reflections = new ArrayDeque<>();
@@ -65,8 +65,8 @@ public class ReflectionSystem {
     }
 
     /**
-     * 记录一次工具调用失败。
-     * 改进：使用通用模式匹配，不依赖硬编码关键词。
+     * Record a tool-call failure.
+     * Improvement: general pattern matching rather than hardcoded keywords.
      */
     public void recordToolFailure(String toolName, String params, String error, String context) {
         String pattern = categorizeFailure(toolName, error);
@@ -86,7 +86,7 @@ public class ReflectionSystem {
     }
 
     /**
-     * 记录一次任务失败。
+     * Record a task failure.
      */
     public void recordTaskFailure(String taskDescription, String reason, String context) {
         String lesson = generateMesoLesson(taskDescription, reason);
@@ -102,11 +102,11 @@ public class ReflectionSystem {
     }
 
     /**
-     * 记录行为模式失败（如反复在同一类任务上失败）。
+     * Record a behavioral failure pattern (such as repeated failure on one task type).
      */
     public void recordPatternFailure(String pattern, int failureCount, String context) {
-        String lesson = "检测到反复失败模式: " + pattern +
-                "（" + failureCount + "次）。建议改变策略或请求帮助。";
+        String lesson = "Repeated failure pattern detected: " + pattern +
+                " (" + failureCount + " occurrences). Consider changing strategy or asking for help.";
 
         addReflection(new Reflection(
                 "macro",
@@ -118,33 +118,33 @@ public class ReflectionSystem {
         ));
     }
 
-    // ─── AgentLoop 兼容方法 ───
+    // ─── AgentLoop compatibility methods ───
 
     /**
-     * 记录失败（AgentLoop 调用）
-     * @param taskDesc 任务描述
-     * @param toolName 工具名称
-     * @param failReason 失败原因
+     * Record a failure (called by AgentLoop)
+     * @param taskDesc task description
+     * @param toolName tool name
+     * @param failReason failure reason
      */
     public void recordFailure(String taskDesc, String toolName, String failReason) {
         recordToolFailure(toolName, taskDesc, failReason, taskDesc);
     }
 
     /**
-     * 记录失败任务（AgentLoop 调用）
-     * @param taskDesc 任务描述
-     * @param attemptedPlan 尝试的计划
-     * @param failReason 失败原因
+     * Record a failed task (called by AgentLoop)
+     * @param taskDesc task description
+     * @param attemptedPlan attempted plan
+     * @param failReason failure reason
      */
     public void recordFailedTask(String taskDesc, String attemptedPlan, String failReason) {
         recordTaskFailure(taskDesc, failReason, attemptedPlan);
     }
 
     /**
-     * 生成供 prompt 使用的反思摘要（AgentLoop 调用）。
-     * 返回最近的教训（不限匹配）——此前的实现走空串匹配，
-     * 导致 micro/meso 级别的教训永远无法进入 prompt。
-     * @return 反思摘要文本
+     * Generate a reflection summary for the prompt (called by AgentLoop).
+     * Return recent lessons without requiring a match; the previous empty-string matching
+     * prevented micro/meso lessons from ever entering the prompt.
+     * @return reflection summary text
      */
     public String summarizeForPrompt() {
         List<Reflection> recent;
@@ -154,8 +154,8 @@ public class ReflectionSystem {
         if (recent.isEmpty()) return "";
 
         StringBuilder sb = new StringBuilder();
-        sb.append("## 教训提醒\n");
-        // 最近 3 条教训（最新的在最后）
+        sb.append("## Lessons to remember\n");
+        // Latest 3 lessons (newest last)
         int start = Math.max(0, recent.size() - 3);
         for (int i = start; i < recent.size(); i++) {
             sb.append("- ").append(recent.get(i).lesson()).append("\n");
@@ -164,26 +164,26 @@ public class ReflectionSystem {
     }
 
     /**
-     * 格式化失败记忆供 prompt 使用（AgentLoop 调用）
-     * @param currentTask 当前任务描述
-     * @return 格式化的失败记忆文本
+     * Format failure memories for the prompt (called by AgentLoop)
+     * @param currentTask current task description
+     * @return formatted failure memory text
      */
     public String formatFailuresForPrompt(String currentTask) {
         List<Reflection> relevant = recallRelevantFailures(currentTask, "");
         if (relevant.isEmpty()) return "";
 
         StringBuilder sb = new StringBuilder();
-        sb.append("## 相关失败记忆\n");
+        sb.append("## Relevant failure memories\n");
         for (Reflection r : relevant) {
-            sb.append("- 任务: ").append(truncate(r.trigger(), 30))
-              .append(" | 教训: ").append(r.lesson()).append("\n");
+            sb.append("- Task: ").append(truncate(r.trigger(), 30))
+              .append("\nLesson: ").append(r.lesson()).append("\n");
         }
         return sb.toString();
     }
 
     /**
-     * 添加反思记录。
-     * 同步保护：exportAll（持久化线程）可能与本方法并发。
+     * Add a reflection record.
+     * Synchronization: exportAll (persistence thread) may run concurrently with this method.
      */
     private void addReflection(Reflection r) {
         synchronized (reflections) {
@@ -195,8 +195,8 @@ public class ReflectionSystem {
     }
 
     /**
-     * 获取与当前任务相关的反思。
-     * 改进：使用更灵活的匹配，不依赖硬编码关键词。
+     * Retrieve reflections relevant to the current task.
+     * Improvement: flexible matching without hardcoded keywords.
      */
     public List<Reflection> recallRelevantFailures(String taskDescription, String toolName) {
         List<Reflection> relevant = new ArrayList<>();
@@ -204,53 +204,53 @@ public class ReflectionSystem {
 
         synchronized (reflections) {
             for (Reflection r : reflections) {
-                // null 防御：反序列化或异常路径可能产生缺字段的记录
+                // Null safety: deserialization or exceptional paths may produce records with missing fields
                 if (r.applicability() == null || r.trigger() == null || r.level() == null) {
                     continue;
                 }
-                // 同类型工具的失败
+                // Failures involving the same tool type
                 if (r.applicability().equals(toolName)) {
                     relevant.add(r);
                 }
-                // 模式匹配的失败（使用通用匹配而非硬编码关键词）
+                // Failure pattern matching (general matching rather than hardcoded keywords)
                 else if (isContextMatch(lowerTask, r.trigger().toLowerCase())) {
                     relevant.add(r);
                 }
-                // macro 级别总是相关
+                // Macro-level lessons are always relevant
                 else if ("macro".equals(r.level())) {
                     relevant.add(r);
                 }
             }
         }
 
-        // 最多返回最近 3 条
+        // Return at most the latest 3
         return relevant.size() > 3 ?
                 new ArrayList<>(relevant.subList(relevant.size() - 3, relevant.size())) :
                 relevant;
     }
 
     /**
-     * 生成供 prompt 使用的反思摘要。
+     * Generate a reflection summary for the prompt.
      */
     public String summarizeForPrompt(String currentTask) {
         List<Reflection> relevant = recallRelevantFailures(currentTask, "");
         if (relevant.isEmpty()) return "";
 
         StringBuilder sb = new StringBuilder();
-        sb.append("## 教训提醒\n");
+        sb.append("## Lessons to remember\n");
         for (Reflection r : relevant) {
             sb.append("- ").append(r.lesson()).append("\n");
         }
         return sb.toString();
     }
 
-    // ─── 私有方法 ───
+    // ─── Private methods ───
 
     /**
-     * 判断上下文是否匹配（通用模式匹配，不依赖硬编码关键词）
+     * Determine whether contexts match (general pattern matching, not hardcoded keywords)
      */
     private boolean isContextMatch(String task, String trigger) {
-        // 提取共同词汇（长度>=3的词）
+        // Extract shared words (length >= 3)
         String[] taskWords = task.split("\\s+");
         for (String word : taskWords) {
             if (word.length() >= 3 && trigger.contains(word)) {
@@ -261,38 +261,38 @@ public class ReflectionSystem {
     }
 
     /**
-     * 失败模式分类 — 使用通用模式，不依赖硬编码关键词。
-     * 基于错误结构而非特定词汇。
+     * Classify failure patterns using general patterns rather than hardcoded keywords.
+     * Based on error structure rather than specific vocabulary.
      */
     private String categorizeFailure(String toolName, String error) {
         if (error == null) return toolName + ":unknown";
         String lower = error.toLowerCase();
 
-        // 通用错误模式分类（基于错误类型而非关键词）
-        // 1. 参数/验证错误
+        // General error classification (by error type, not keywords)
+        // 1. Parameter/validation errors
         if (lower.contains("invalid") || lower.contains("illegal") ||
             lower.contains("missing") || lower.contains("required") ||
             lower.contains("null") || lower.contains("empty")) {
             return toolName + ":invalid_params";
         }
-        // 2. 资源/对象未找到
+        // 2. Resource/object not found
         if (lower.contains("not found") || lower.contains("no such") ||
             lower.contains("doesn't exist") || lower.contains("cannot find") ||
             lower.contains("unable to locate")) {
             return toolName + ":not_found";
         }
-        // 3. 权限/访问错误
+        // 3. Permission/access errors
         if (lower.contains("cannot") || lower.contains("can't") ||
             lower.contains("denied") || lower.contains("forbidden") ||
             lower.contains("not allowed") || lower.contains("unreachable")) {
             return toolName + ":access_denied";
         }
-        // 4. 超时/性能问题
+        // 4. Timeout/performance issues
         if (lower.contains("timeout") || lower.contains("timed out") ||
             lower.contains("too slow") || lower.contains("expired")) {
             return toolName + ":timeout";
         }
-        // 5. 状态/条件不满足
+        // 5. Unsatisfied state/conditions
         if (lower.contains("already") || lower.contains("not ready") ||
             lower.contains("busy") || lower.contains("locked") ||
             lower.contains("in use")) {
@@ -303,72 +303,72 @@ public class ReflectionSystem {
     }
 
     /**
-     * 生成 Micro 级别教训 — 基于错误类型生成通用建议。
+     * Generate a micro-level lesson with general advice based on error type.
      */
     private String generateMicroLesson(String toolName, String error, String params) {
         String lower = error != null ? error.toLowerCase() : "";
 
-        // 参数错误
+        // Parameter errors
         if (lower.contains("invalid") || lower.contains("illegal") ||
             lower.contains("missing") || lower.contains("required")) {
-            return "工具 " + toolName + " 参数无效。检查参数格式和必需字段，当前参数: " +
+            return "Tool " + toolName + " has invalid parameters. Check the parameter format and required fields. Current parameters: " +
                     truncate(params, 30);
         }
-        // 未找到
+        // Not found
         if (lower.contains("not found") || lower.contains("no such") ||
             lower.contains("cannot find")) {
-            return "未找到目标。使用 look_around 扫描环境，确认目标存在后再尝试 " + toolName + "。";
+            return "Target not found. Scan the surroundings with look_around and confirm the target exists before retrying " + toolName + ".";
         }
-        // 访问/权限问题
+        // Access/permission issues
         if (lower.contains("cannot") || lower.contains("can't") ||
             lower.contains("unreachable") || lower.contains("denied")) {
-            return "无法执行 " + toolName + "。检查目标是否可达，或尝试移动到更靠近的位置。";
+            return "Cannot execute " + toolName + ". Check whether the target is reachable, or try moving closer.";
         }
-        // 超时
+        // Timeout
         if (lower.contains("timeout") || lower.contains("timed out")) {
-            return toolName + " 操作超时。目标可能太远或环境复杂，考虑分解任务或改变策略。";
+            return toolName + " timed out. The target may be too far away or the environment too complex; consider breaking down the task or changing strategy.";
         }
-        // 状态冲突
+        // State conflict
         if (lower.contains("already") || lower.contains("busy") ||
             lower.contains("locked")) {
-            return "目标状态冲突。等待当前操作完成或选择其他目标。";
+            return "Target state conflict. Wait for the current operation to finish or choose another target.";
         }
 
-        // 通用建议
-        return "工具 " + toolName + " 失败: " + truncate(error, 40) +
-                "。检查参数并确认目标状态。";
+        // General advice
+        return "Tool " + toolName + " failed: " + truncate(error, 40) +
+                ". Check the parameters and confirm the target state.";
     }
 
     /**
-     * 生成 Meso 级别教训。
+     * Generate a meso-level lesson.
      */
     private String generateMesoLesson(String taskDescription, String reason) {
         String lowerReason = reason != null ? reason.toLowerCase() : "";
 
-        // 任务分解问题
+        // Task decomposition issues
         if (lowerReason.contains("too complex") || lowerReason.contains("too big") ||
             lowerReason.contains("overwhelming")) {
-            return "任务 '" + truncate(taskDescription, 25) + "' 过于复杂。尝试将其分解为更小的子任务。";
+            return "Task '" + truncate(taskDescription, 25) + "' is too complex. Try breaking it into smaller subtasks.";
         }
-        // 资源不足
+        // Insufficient resources
         if (lowerReason.contains("lack") || lowerReason.contains("insufficient") ||
             lowerReason.contains("not enough") || lowerReason.contains("missing")) {
-            return "资源不足。先收集所需材料，或使用 find_block 定位资源。";
+            return "Insufficient resources. Gather the required materials first, or use find_block to locate resources.";
         }
-        // 路径/导航问题
+        // Path/navigation issues
         if (lowerReason.contains("stuck") || lowerReason.contains("cannot reach") ||
             lowerReason.contains("blocked") || lowerReason.contains("unreachable")) {
-            return "导航受阻。使用 look_around 寻找替代路径，或清理障碍物。";
+            return "Navigation is blocked. Use look_around to find an alternative route, or clear the obstacles.";
         }
-        // 环境/外部因素
+        // Environmental/external factors
         if (lowerReason.contains("danger") || lowerReason.contains("hostile") ||
             lowerReason.contains("threat")) {
-            return "环境危险。先确保安全（消除威胁或寻找安全区域）再继续任务。";
+            return "The environment is dangerous. Secure the area by eliminating threats or finding a safe location before continuing the task.";
         }
 
-        // 通用建议
-        return "任务 '" + truncate(taskDescription, 25) + "' 失败: " +
-                truncate(reason, 40) + "。考虑改变策略或分解任务。";
+        // General advice
+        return "Task '" + truncate(taskDescription, 25) + "' failed: " +
+                truncate(reason, 40) + ". Consider changing strategy or breaking down the task.";
     }
 
     private static String truncate(String s, int maxLen) {
@@ -376,14 +376,14 @@ public class ReflectionSystem {
         return s.length() > maxLen ? s.substring(0, maxLen) + "..." : s;
     }
 
-    /** 获取反思数量 */
+    /** Get the number of reflections */
     public int size() {
         synchronized (reflections) {
             return reflections.size();
         }
     }
 
-    /** 清空所有反思 */
+    /** Clear all reflections */
     public void clear() {
         synchronized (reflections) {
             reflections.clear();
@@ -391,10 +391,10 @@ public class ReflectionSystem {
         failurePatterns.clear();
     }
 
-    // ─── 持久化支持 ───
+    // ─── Persistence support ───
 
     /**
-     * 导出所有反思记录（用于持久化保存）。
+     * Export all reflections for persistence.
      */
     public List<Reflection> exportAll() {
         synchronized (reflections) {
@@ -403,22 +403,22 @@ public class ReflectionSystem {
     }
 
     /**
-     * 导出失败模式统计（用于持久化保存）。
+     * Export failure pattern counts for persistence.
      */
     public ConcurrentMap<String, Integer> exportPatterns() {
         return new ConcurrentHashMap<>(failurePatterns);
     }
 
     /**
-     * 导入反思记录和失败模式（用于持久化恢复），替换当前所有数据。
+     * Import persisted reflections and failure patterns, replacing all current data.
      */
     public void importAll(List<Reflection> imported, Map<String, Integer> patterns) {
         synchronized (reflections) {
             reflections.clear();
             if (imported != null) {
                 for (Reflection r : imported) {
-                    // 过滤缺字段的记录（旧版本文件/手工编辑可能缺组件），
-                    // 防止召回路径上 trigger/applicability 为 null 引发 NPE
+                    // Filter records with missing fields (older files or manual edits may omit components),
+                    // preventing null trigger/applicability values from causing an NPE during recall
                     if (r != null && r.lesson() != null && r.trigger() != null
                             && r.applicability() != null && r.level() != null) {
                         reflections.addLast(r);

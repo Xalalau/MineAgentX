@@ -43,6 +43,8 @@ On Windows, use `gradlew.bat`. Gradle downloads its build dependencies. The outp
 4. Press `M` to configure/create a companion, or use `/mineagent quick` with saved configuration.
 5. Press `C` for companion chat. Other default keys: `H` status HUD, `P` paths, `V` perception overlay, `N` labels.
 
+Reasoning is server-managed: use `auto` or leave the creation field blank. Runtime Settings reports commands as queued; server replies confirm each result. The inference deadline defaults to 180 seconds across request, provider, and agent-round layers.
+
 The three-companions-per-owner limit remains; the inherited code also requires distinct model identifiers for companions belonging to the same owner.
 
 ## Modules

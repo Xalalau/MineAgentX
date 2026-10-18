@@ -9,10 +9,9 @@ import java.util.List;
 /**
  * Loader-neutral definitions for every MineAgent key mapping.
  *
- * <p>Fabric and NeoForge must register the same {@link KeyMapping} instances
- * with their own event APIs. Keeping only the registration call in each
- * platform module prevents the bindings, defaults, and UI behavior from
- * drifting apart.
+ * <p>The NeoForge adapter registers these {@link KeyMapping} instances
+ * with its event API. Keeping registration separate from these definitions
+ * keeps bindings, defaults, and UI behavior consistent.
  */
 public final class MineAgentKeyMappings {
 

@@ -65,6 +65,7 @@ All paths below are relative to this repository unless explicitly labeled extern
 - `tools/.../ToolRegistration.java`: authoritative tool catalog. Follow each tool into its executor before claiming a capability works.
 - `api/.../config/MineAgentConfig.java`: defaults and persistence for runtime `config/mineagent.json`.
 - `api/.../llm/LLMRequest.java`, `LLMResponse.java`, `ChatMessage.java`: transport contracts, deadlines, conversation history, tool calls/results.
+- `api/.../llm/model/ThinkingEffortSpec.java`: shared automatic reasoning input policy and restricted migration of legacy local effort values during restoration.
 - `engine/.../llm/OpenAICompatibleProvider.java`, `OllamaNativeProvider.java`: the two supported wire-protocol implementations; shared validation/serialization lives alongside them.
 - `engine/src/client/java/com/mineagent/engine/client/ui/ProviderPresets.java` and `screen/SpawnCompanionScreen.java`: supported local choices, model/endpoint editing, and connection setup.
 
@@ -76,8 +77,11 @@ All paths below are relative to this repository unless explicitly labeled extern
 | Ollama | Native `POST /api/chat`; typical root `http://127.0.0.1:11434`; the actual installed model must be configured, never guessed. |
 
 - Loopback refers to the machine running the Minecraft server, not necessarily the player's client or this assistant's container. Local/private-LAN endpoint validation must remain consistent in presets, spawn/configuration, and request execution.
-- Preserve the server's automatic reasoning/template policy. Do not inject cloud-only reasoning fields, launcher MTP flags, or assume a model's advertised maximum is the live context allocation.
-- Check timeouts end to end: provider HTTP defaults, `LLMRequest`, and the explicit `AgentLoop` deadline can differ. Do not claim a longer deadline is implemented merely because one layer changed.
+- Preserve the server's automatic reasoning/template policy: new inputs accept only blank/`auto`. `ThinkingEffortSpec` is shared by UI and server. During restoration only, recognized legacy effort levels for the two supported local adapters migrate to `auto` with a diagnostic; never silently remap unsupported providers or saved endpoints.
+- Partial configuration defaults are provider-aware: Ollama uses its native endpoint but requires an explicit model; Bonsai keeps its documented defaults. Preserve explicit endpoint/model overrides.
+- Reject malformed announced tool-call structures and blank/non-string/duplicate explicit IDs through the retryable malformed-response path. Preserve valid IDs exactly; generate unique IDs only when absent/null. Text/reasoning-only responses without calls remain valid.
+- Do not inject cloud-only reasoning fields, launcher MTP flags, or assume a model's advertised maximum is the live context allocation.
+- `LLMRequest.DEFAULT_DEADLINE` is the shared 180-second local inference default used by provider transport and every `AgentLoop` reasoning round. Preserve explicit caller deadlines and cancellation. The shorter connection-establishment timeout is separate from the inference deadline; check all layers together when changing either.
 - The external launcher reference is `<local-launcher>`. The mod connects over HTTP; it does not load files from that directory or start/modify the launcher.
 - Never load or download models, alter the external launcher, or treat an unrelated installed model as a suitable companion model without authorization.
 - Protocol fixtures prove request/response handling, not real model quality, MTP operation, or in-world behavior.

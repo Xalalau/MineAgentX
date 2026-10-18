@@ -33,23 +33,23 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 记忆持久化管理器 — 将认知系统的记忆保存到磁盘，并在启动时恢复。
+ * Memory persistence manager — saves cognitive memories to disk and restores them on startup.
  *
- * <p>解决的问题：所有记忆系统（CognitiveMap、PlaceEventMemory、ReflectionSystem、
- * ImportanceEvaluator）都是纯内存的，游戏关闭后全部丢失，
- * 伴游每次重启都"失忆"。
+ * <p>Problem addressed: all memory systems (CognitiveMap, PlaceEventMemory, ReflectionSystem,
+ * and ImportanceEvaluator) otherwise live only in memory and vanish when the game closes,
+ * leaving companions with amnesia after every restart.
  *
- * <p>设计：
+ * <p>Design:
  * <ul>
- *   <li>真实数据保存：完整序列化各记忆系统的条目（非元数据）</li>
- *   <li>启动恢复：伴游创建时自动恢复上次保存的记忆</li>
- *   <li>定期自动保存：由 AgentLoop 每回合触发（内部限频 1 分钟）</li>
- *   <li>关闭保存：伴游移除/服务器关闭时强制保存</li>
- *   <li>容错：单个文件损坏不影响其他记忆恢复</li>
+ *   <li>Full data persistence: serialize each memory system's entries, not just metadata</li>
+ *   <li>Startup restoration: restore the previous save when the companion is created</li>
+ *   <li>Periodic autosave: triggered each AgentLoop turn, internally limited to once per minute</li>
+ *   <li>Shutdown save: force a save when the companion is removed or the server stops</li>
+ *   <li>Fault tolerance: one corrupt file does not prevent other memories from being restored</li>
  * </ul>
  *
- * <p>每个伴游拥有独立的记忆目录（world/data/mineagent_memory/&lt;companionId&gt;/），
- * 多个伴游之间记忆互不干扰。
+ * <p>Each companion has its own directory (world/data/mineagent_memory/&lt;companionId&gt;/),
+ * so multiple companions' memories remain independent.
  */
 public class MemoryPersistence {
 
@@ -83,7 +83,7 @@ public class MemoryPersistence {
     private static final int MAX_DIALOGUE_PAIRS = 12;
     private static final int MAX_DIALOGUE_CHARS = 4_000;
 
-    /** 自动保存间隔（毫秒） */
+    /** Autosave interval in milliseconds */
     private static final long AUTO_SAVE_INTERVAL = 60_000;
 
     private volatile Path memoryDir;
@@ -105,14 +105,14 @@ public class MemoryPersistence {
     private final ActionTransactionLedger actionLedger;
     private final ResourceReservationLedger reservationLedger;
 
-    /** 上次保存时间 */
+    /** Last save time */
     private volatile long lastSaveTime = 0;
     /** Transport state is kept separate from searchable gameplay memory. */
     private volatile ProviderSessionState loadedProviderSession;
     private volatile long lastProviderSaveTime;
 
     /**
-     * @param memoryDir 该伴游专属的记忆目录（由调用方确保唯一性）
+     * @param memoryDir companion-specific memory directory (caller ensures uniqueness)
      */
     public MemoryPersistence(Path memoryDir,
                              CognitiveMap cognitiveMap,
@@ -153,7 +153,7 @@ public class MemoryPersistence {
     }
 
     /**
-     * 保存所有记忆到磁盘。每个系统独立保存，单个失败不影响其他。
+     * Save all memories to disk independently so one system's failure does not block the others.
      */
     public synchronized void saveAll() {
         try {
@@ -217,8 +217,8 @@ public class MemoryPersistence {
     }
 
     /**
-     * 自动保存（距上次保存超过 1 分钟才真正写入）。
-     * 由 AgentLoop 每回合开始时调用，开销可忽略。
+     * Autosave only when more than one minute has passed since the last save.
+     * Called at the start of each AgentLoop turn with negligible overhead.
      */
     public void autoSave() {
         if (System.currentTimeMillis() - lastSaveTime > AUTO_SAVE_INTERVAL) {
@@ -227,7 +227,7 @@ public class MemoryPersistence {
     }
 
     /**
-     * 从磁盘恢复所有记忆。每个系统独立恢复，单个文件损坏不影响其他。
+     * Restore memories independently so a corrupt file does not prevent other systems from loading.
      */
     public synchronized void loadAll() {
         if (!Files.isDirectory(memoryDir)) return;
@@ -510,8 +510,8 @@ public class MemoryPersistence {
     }
 
     /**
-     * 原子写入：先写临时文件再移动，避免游戏崩溃留下截断的 JSON
-     * （截断文件会导致下次启动时该记忆系统被静默清零）。
+     * Atomic write: write a temporary file, then move it to avoid truncated JSON after a crash
+     * (which would silently clear that memory system on the next startup).
      */
     private static void writeAtomic(Path target, String content) throws IOException {
         Files.createDirectories(target.getParent());
@@ -895,8 +895,8 @@ public class MemoryPersistence {
     }
 
     /**
-     * 迁移记忆目录（伴游改名时调用）。
-     * 先把当前记忆刷到旧目录，再把文件移动到新目录，后续读写都走新目录。
+     * Migrate the memory directory when a companion is renamed.
+     * Flush to the old directory, move files to the new one, then direct all further I/O there.
      */
     public synchronized void migrateTo(Path newDir) {
         if (newDir == null || newDir.equals(memoryDir)) return;
@@ -931,7 +931,7 @@ public class MemoryPersistence {
     }
 
     /**
-     * 清空该伴游的所有持久化记忆文件。
+     * Delete all persisted memory files for this companion.
      */
     public synchronized void clearAll() {
         try {

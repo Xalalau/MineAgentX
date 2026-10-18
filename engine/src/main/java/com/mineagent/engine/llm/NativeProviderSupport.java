@@ -7,68 +7,13 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonObject;
 import com.mineagent.api.llm.ChatMessage;
-import com.mineagent.api.llm.provider.LLMProviderException;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.List;
-import java.util.Map;
 
-/** Shared transport and wire helpers for native vendor adapters. */
+/** Native Ollama message and argument serialization. */
 final class NativeProviderSupport {
     static final Gson GSON = new GsonBuilder().create();
-    static final HttpClient HTTP = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(30)).build();
-
     private NativeProviderSupport() {}
-
-    static Duration timeout(Duration deadline) {
-        if (deadline == null || deadline.isNegative() || deadline.isZero()) {
-            return Duration.ofSeconds(30);
-        }
-        return deadline.compareTo(Duration.ofMinutes(10)) > 0
-                ? Duration.ofMinutes(10) : deadline;
-    }
-
-    static HttpResponse<String> post(String provider, String url, String body,
-                                     Map<String, String> headers, Duration deadline) {
-        try {
-            HttpRequest.Builder builder = HttpRequest.newBuilder()
-                    .uri(URI.create(url)).header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
-                    .timeout(timeout(deadline));
-            // Host is derived from the request URI by java.net.http and is a
-            // restricted header on some JDKs.  Protocol signers still include
-            // it in their canonical request, but must not try to inject it as
-            // an ordinary application header.
-            if (headers != null) headers.forEach((name, value) -> {
-                if (name != null && !"host".equalsIgnoreCase(name)) {
-                    builder.header(name, value);
-                }
-            });
-            HttpResponse<String> response = HTTP.send(builder.build(),
-                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw LLMProviderException.http(provider, response.statusCode(), response.body(),
-                        response.headers().firstValue("Retry-After").orElse(null));
-            }
-            return response;
-        } catch (LLMProviderException failure) {
-            throw failure;
-        } catch (java.io.IOException failure) {
-            throw LLMProviderException.transport(provider, failure);
-        } catch (InterruptedException interrupted) {
-            Thread.currentThread().interrupt();
-            throw new LLMProviderException(provider + " API call interrupted", null, false,
-                    interrupted);
-        } catch (RuntimeException malformed) {
-            throw malformed;
-        }
-    }
 
     static JsonArray messages(List<ChatMessage> messages) {
         JsonArray array = new JsonArray();
@@ -99,14 +44,6 @@ final class NativeProviderSupport {
         return array;
     }
 
-    static JsonArray tools(List<Map<String, Object>> tools) {
-        JsonArray array = new JsonArray();
-        if (tools != null) for (Map<String, Object> tool : tools) {
-            if (tool != null) array.add(GSON.toJsonTree(tool));
-        }
-        return array;
-    }
-
     /**
      * Normalize a vendor tool-call argument value to the unified JSON string
      * representation.  Several native APIs are inconsistent here: some send
@@ -133,8 +70,4 @@ final class NativeProviderSupport {
         return GSON.toJson(value);
     }
 
-    static String endpoint(String configured, String fallback, String suffix, String provider) {
-        String base = ProviderSupport.validatedBaseUrl(configured, fallback, provider);
-        return ProviderSupport.endpoint(base, suffix);
-    }
 }

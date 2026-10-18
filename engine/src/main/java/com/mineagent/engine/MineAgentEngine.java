@@ -6,6 +6,7 @@ import com.mineagent.api.config.MineAgentConfig;
 import com.mineagent.api.entity.AgentPlayer;
 import com.mineagent.api.entity.CompanionGameMode;
 import com.mineagent.api.entity.CompanionLifecycle;
+import com.mineagent.api.llm.model.ThinkingEffortSpec;
 import com.mineagent.api.llm.provider.LLMProviderRegistry;
 import com.mineagent.api.platform.Services;
 import com.mineagent.api.task.*;
@@ -126,48 +127,9 @@ public final class MineAgentEngine {
         // Load configuration from disk (or create defaults)
         config = MineAgentConfig.load(configDir);
 
-        // Register LLM providers
-        LLMProviderRegistry.register(OpenAICompatibleProvider.openai());
-        LLMProviderRegistry.register(OpenAICompatibleProvider.deepseek());
-        LLMProviderRegistry.register(OpenAICompatibleProvider.qwen());
-        LLMProviderRegistry.register(OpenAICompatibleProvider.glm());
-        LLMProviderRegistry.register(OpenAICompatibleProvider.moonshot());
-        LLMProviderRegistry.register(OpenAICompatibleProvider.grok());
-        LLMProviderRegistry.register(OpenAICompatibleProvider.minimax());
-        // Native Responses API adapter for Astra and future Responses models.
-        // It remains an explicit provider choice so existing relay configs keep
-        // using their established Chat Completions wire format.
-        LLMProviderRegistry.register(new OpenAIResponsesProvider());
-        LLMProviderRegistry.register(new AnthropicProvider());
-        LLMProviderRegistry.register(new GeminiProvider());
-        // AWS Bedrock's provider-neutral Runtime Converse protocol. It is kept
-        // as a separate adapter because Bedrock authentication (SigV4) and
-        // endpoint paths are not compatible with Chat Completions relays.
-        LLMProviderRegistry.register(new BedrockConverseProvider());
-        LLMProviderRegistry.register(new BedrockInvokeModelProvider());
-        LLMProviderRegistry.register(new AzureOpenAIProvider());
-        LLMProviderRegistry.register(new VertexAIProvider());
-        LLMProviderRegistry.register(new CohereProvider());
-        LLMProviderRegistry.register(new AI21Provider());
-        LLMProviderRegistry.register(new BaiduQianfanProvider());
-        LLMProviderRegistry.register(new TencentHunyuanProvider());
-        LLMProviderRegistry.register(new ByteDanceArkProvider());
+        // Only local OpenAI-compatible Bonsai and native Ollama inference are built in.
+        LLMProviderRegistry.register(new OpenAICompatibleProvider());
         LLMProviderRegistry.register(new OllamaNativeProvider());
-        // Vendor-neutral aliases are the public compatibility boundary. Old
-        // vendor ids above remain registered so existing configs and stored
-        // companions keep working after the v0.3.5 migration.
-        LLMProviderRegistry.register(new ProtocolAliasProvider(
-                "openai-compatible", "OpenAI Chat Completions compatible",
-                OpenAICompatibleProvider.openai(), false));
-        LLMProviderRegistry.register(new ProtocolAliasProvider(
-                "anthropic-compatible", "Anthropic Messages compatible",
-                new AnthropicProvider()));
-        LLMProviderRegistry.register(new ProtocolAliasProvider(
-                "gemini-compatible", "Gemini generateContent compatible",
-                new GeminiProvider()));
-        LLMProviderRegistry.register(new ProtocolAliasProvider(
-                "bedrock", "AWS Bedrock Converse compatible",
-                new BedrockConverseProvider()));
 
         // Register survival instinct chains (H1 fix)
         // Build SurvivalConfig from the loaded MineAgentConfig
@@ -471,12 +433,12 @@ public final class MineAgentEngine {
      *
      * @param owner        the human player who owns this companion
      * @param name         the companion's display name
-     * @param providerId       the LLM provider id (e.g. "openai", "deepseek")
+     * @param providerId       the local LLM provider id ("openai-compatible" or "ollama")
      * @param apiKey           the API key for the provider
-     * @param model            the model name (e.g. "gpt-4o")
+     * @param model            the server model alias (for example "swift-bonsai2-27b-katana-mtp")
      * @param baseUrl          optional base URL override (for proxies/local models)
      * @param temperature      sampling temperature (0.0 - 2.0)
-     * @param reasoningEffort  reasoning effort (off/low/medium/high/xhigh/max) or null
+     * @param reasoningEffort  server-managed reasoning (auto) or null
      * @param isRestore        true when restoring from a saved on-disk record
      *                         (skips applySkinAsync and persistCompanion, since
      *                         the caller applies the saved skin and the disk
@@ -518,12 +480,30 @@ public final class MineAgentEngine {
         CompanionGameMode gameMode = requestedGameMode == null
                 ? CompanionGameMode.SURVIVAL : requestedGameMode;
 
+        String effortDiagnostic = "";
+        try {
+            if (isRestore) {
+                var restored = ThinkingEffortSpec.restore(providerId, reasoningEffort);
+                reasoningEffort = restored.effort();
+                effortDiagnostic = restored.diagnostic();
+            } else {
+                reasoningEffort = ThinkingEffortSpec.normalize(reasoningEffort);
+            }
+        } catch (IllegalArgumentException invalidEffort) {
+            if (owner != null) owner.sendSystemMessage(Component.literal(
+                    "§c[MineAgent] Cannot spawn companion: " + invalidEffort.getMessage()));
+            return null;
+        }
         String invalid = validateSpawnArguments(owner, name, providerId, apiKey,
                 model, baseUrl, temperature, reasoningEffort);
         if (invalid != null) {
             if (owner != null) owner.sendSystemMessage(Component.literal(
                     "§c[MineAgent] Cannot spawn companion: " + invalid));
             return null;
+        }
+
+        if (!effortDiagnostic.isEmpty()) {
+            System.out.println("[MineAgent] " + effortDiagnostic);
         }
 
         // ── Multi-companion checks (max 3, unique model, unique name) ──
@@ -535,7 +515,7 @@ public final class MineAgentEngine {
             return null;
         }
         // No two companions may use the exact same model (same series different
-        // variant is allowed, e.g. gpt-5.6-sol and gpt-5.6-mini are OK).
+        // variant is allowed, e.g. local-model-a and local-model-b are OK).
         for (UUID cid : existing) {
             CompanionState s = COMPANIONS.get(cid);
             if (s != null && model != null && model.equalsIgnoreCase(s.loop.getModel())) {
@@ -558,8 +538,8 @@ public final class MineAgentEngine {
         // The Minecraft protocol limits player names to 16 chars of [A-Za-z0-9_],
         // so we sanitize the name for the GameProfile. But the companion's
         // DISPLAY name (companionName + customName above head + tab list) can
-        // be the full original name — so "deepseek-v4-flash" shows completely
-        // instead of being truncated to "deepseek_v4_flas".
+        // be the full original name — so "swift-bonsai2-27b-katana-mtp" shows completely
+        // instead of being truncated to "swift_bonsai2_27".
         final String playerName;
         try {
             playerName = availableProfileName(owner, name);
@@ -626,8 +606,8 @@ public final class MineAgentEngine {
         // the tab list comes from the PlayerList entry, NOT from
         // setCustomName(). The PlayerList entry is initialized from the
         // GameProfile, which carries the sanitized (16-char max) name.
-        // Without this, the client shows "deepseek_v4_flas" (truncated)
-        // instead of "deepseek-v4-flash" (full) above the head.
+        // Without this, the client shows "swift_bonsai2_27" (truncated)
+        // instead of "swift-bonsai2-27b-katana-mtp" (full) above the head.
         // Use reflection to set the "tabListName" field on Player, since
         // the setter method name varies between mappings.
         setTabListDisplay(fakePlayer, name);
@@ -788,8 +768,8 @@ public final class MineAgentEngine {
                 ? (mayReuseStoredKey ? previous.apiKey() : "") : apiKey;
         String resolvedName = name == null || name.isBlank()
                 ? resolvedModel : name.trim();
-        String resolvedEffort = reasoningEffort == null || reasoningEffort.isBlank()
-                ? null : reasoningEffort.trim().toLowerCase(Locale.ROOT);
+        // The canonical spawn path validates and normalizes the reasoning policy.
+        String resolvedEffort = reasoningEffort;
         CompanionGameMode gameMode = CompanionGameMode.parse(requestedGameMode)
                 .orElse(requestedGameMode == null || requestedGameMode.isBlank()
                         ? CompanionGameMode.SURVIVAL : null);
@@ -831,24 +811,7 @@ public final class MineAgentEngine {
     }
 
     private static String canonicalProtocol(String providerId) {
-        if (providerId == null) return "";
-        return switch (providerId.trim().toLowerCase(Locale.ROOT)) {
-            case "openai", "deepseek", "qwen", "glm", "moonshot", "grok",
-                    "minimax", "openai-compatible" -> "openai-compatible";
-            case "anthropic", "anthropic-compatible" -> "anthropic-compatible";
-            case "gemini", "gemini-compatible" -> "gemini-compatible";
-            case "aws-bedrock", "bedrock" -> "aws-bedrock";
-            case "aws-bedrock-invoke", "bedrock-invoke" -> "aws-bedrock-invoke";
-            case "azure", "azure-openai" -> "azure-openai";
-            case "vertex", "vertex-ai" -> "vertex-ai";
-            case "cohere" -> "cohere";
-            case "ai21", "jamba" -> "ai21";
-            case "baidu", "baidu-qianfan", "qianfan" -> "baidu-qianfan";
-            case "tencent", "tencent-hunyuan", "hunyuan" -> "tencent-hunyuan";
-            case "ark", "bytedance", "bytedance-ark" -> "bytedance-ark";
-            case "ollama" -> "ollama";
-            default -> providerId.trim().toLowerCase(Locale.ROOT);
-        };
+        return providerId == null ? "" : providerId.trim().toLowerCase(Locale.ROOT);
     }
 
     private static String effectiveBaseUrl(String providerId, String configured) {
@@ -1590,7 +1553,7 @@ public final class MineAgentEngine {
                 return;
             }
             // "@name" with no space — treat the whole thing as a message
-            // to the primary companion (e.g. "@去砍树" → primary hears "去砍树")
+            // to the primary companion (e.g. "@gather wood" -> primary hears "gather wood")
             CompanionState primary = all.get(0);
             primary.loop.onOwnerMessage("[" + ownerName + "]: " + trimmed.substring(1));
             return;
@@ -2393,19 +2356,21 @@ public final class MineAgentEngine {
 
                             String[] parts = args.split("\\s+", 2);
                             String companionName;
-                            String effort;
+                            String requestedEffort;
                             if (parts.length >= 2) {
                                 companionName = parts[0];
-                                effort = parts[1].toLowerCase();
+                                requestedEffort = parts[1];
                             } else {
                                 companionName = null;
-                                effort = parts[0].toLowerCase();
+                                requestedEffort = parts[0];
                             }
 
-                            // Validate effort value
-                            if (!List.of("off", "low", "medium", "high", "xhigh", "max").contains(effort)) {
+                            final String effort;
+                            try {
+                                effort = ThinkingEffortSpec.normalize(requestedEffort);
+                            } catch (IllegalArgumentException invalidEffort) {
                                 source.sendFailure(Component.literal(
-                                        "§c[MineAgent] Invalid effort. Use: off, low, medium, high, xhigh, max"));
+                                        "§c[MineAgent] " + invalidEffort.getMessage()));
                                 return 0;
                             }
 
@@ -2447,13 +2412,11 @@ public final class MineAgentEngine {
                     ? cfgModel : rawConfiguredName;
         }
 
-        String normalizedEffort = reasoningEffort == null
-                ? null : reasoningEffort.toLowerCase(Locale.ROOT);
-        if (normalizedEffort != null
-                && !List.of("off", "low", "medium", "high", "xhigh", "max")
-                        .contains(normalizedEffort)) {
-            source.sendFailure(Component.literal(
-                    "§c[MineAgent] Invalid effort. Use: off, low, medium, high, xhigh, max"));
+        final String normalizedEffort;
+        try {
+            normalizedEffort = ThinkingEffortSpec.normalize(reasoningEffort);
+        } catch (IllegalArgumentException invalidEffort) {
+            source.sendFailure(Component.literal("§c[MineAgent] " + invalidEffort.getMessage()));
             return 0;
         }
         CompanionEntity companion = spawnCompanion(
@@ -2526,24 +2489,17 @@ public final class MineAgentEngine {
         if (!Double.isFinite(temperature) || temperature < 0.0 || temperature > 2.0) {
             return "temperature must be a finite number from 0 to 2";
         }
-        if (baseUrl != null && !baseUrl.isBlank()) {
-            if (baseUrl.length() > 2048) return "base URL is too long";
-            try {
-                var uri = java.net.URI.create(baseUrl.trim());
-                if (!("http".equalsIgnoreCase(uri.getScheme())
-                        || "https".equalsIgnoreCase(uri.getScheme()))
-                        || uri.getHost() == null || uri.getQuery() != null
-                        || uri.getFragment() != null) {
-                    return "base URL must be an absolute HTTP(S) URL without query or fragment";
-                }
-            } catch (IllegalArgumentException malformedUrl) {
-                return "base URL is malformed";
-            }
+        if (baseUrl != null && baseUrl.length() > 2048) return "base URL is too long";
+        try {
+            OpenAICompatibleProvider.validateBaseUrl(baseUrl == null || baseUrl.isBlank()
+                    ? provider.defaultBaseUrl() : baseUrl);
+        } catch (IllegalArgumentException invalidUrl) {
+            return invalidUrl.getMessage();
         }
-        if (reasoningEffort != null && !reasoningEffort.isBlank()
-                && !List.of("off", "low", "medium", "high", "xhigh", "max")
-                        .contains(reasoningEffort.toLowerCase(Locale.ROOT))) {
-            return "invalid reasoning effort '" + reasoningEffort + "'";
+        try {
+            ThinkingEffortSpec.normalize(reasoningEffort);
+        } catch (IllegalArgumentException invalidEffort) {
+            return invalidEffort.getMessage();
         }
         return null;
     }
@@ -2585,7 +2541,7 @@ public final class MineAgentEngine {
      * <p>In Minecraft, the player's name shown above the head and in the
      * tab list comes from the PlayerList entry's display name, which is
      * initialized from the GameProfile. The GameProfile name is limited
-     * to 16 chars, so "deepseek-v4-flash" gets truncated to "deepseek_v4_flas".
+     * to 16 chars, so "swift-bonsai2-27b-katana-mtp" gets truncated to "swift_bonsai2_27".
      *
      * <p>This method searches for the tab list name field/method by type
      * (Component) rather than by name, because field names differ between
@@ -2699,8 +2655,8 @@ public final class MineAgentEngine {
             §e/mineagent rename§7 <newname>
               §aRename your companion (no name tag needed)
 
-            §e/mineagent seteffort§7 [name] <off|low|medium|high|xhigh|max>
-              §aSet companion's thinking effort level
+            §e/mineagent seteffort§7 [name] <auto>
+              §aUse server-managed reasoning and chat-template defaults
 
             §e/mineagent setconfig§7 <key> <value>
               §aUpdate config and save to file. Keys:

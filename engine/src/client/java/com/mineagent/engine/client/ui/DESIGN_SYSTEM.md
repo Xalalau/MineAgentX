@@ -1,46 +1,46 @@
-# MineAgent 客户端界面规范
+# MineAgent Client UI Design System
 
-MineAgent 的 Fabric 与 NeoForge 客户端共用 `engine/src/client`。界面保持
-Minecraft 原生像素风格，同时避免在世界画面上叠加多个同权重边框。
+The NeoForge-only client uses `engine/src/client`. Keep Minecraft's
+native pixel style without stacking multiple equally prominent borders over the world view.
 
-## 层级
+## Hierarchy
 
-1. 每个全屏界面只有一个主面板。
-2. 标题位于 24px 高的石墨灰标题区，青绿色只用于顶部强调线和选中状态。
-3. 分区使用文字和 1px 分隔线，不在主面板内继续嵌套装饰卡片。
-4. EditBox 必须有独立可见标签；hint 只说明空值语义，不能代替标签。
-5. HUD 默认紧凑并避开屏幕中心；长内容只放在可关闭页面中。
+1. Each full-screen view has exactly one main panel.
+2. Titles sit in a 24px-high graphite header; teal is reserved for the top accent line and selected states.
+3. Use text and 1px separators for sections, rather than nested decorative cards inside the main panel.
+4. Every EditBox must have a separate, visible label. Hints explain what an empty value means; they never replace labels.
+5. Keep the HUD compact by default and away from the screen center. Put long content only in dismissible screens.
 
-## 颜色
+## Colors
 
-| 用途 | ARGB | 说明 |
+| Purpose | ARGB | Notes |
 |---|---:|---|
-| 主面板 | `0xF0181D20` | 高不透明度石墨灰 |
-| 标题区 | `0xF0242B2F` | 与内容区保持轻微层次 |
-| 边框 | `0xFF4B565B` | 中性灰，避免高亮整圈边框 |
-| 强调 | `0xFF55C2AA` | 低饱和青绿，只用于状态与顶部线 |
-| 主文字 | `0xFFF1F5F4` | 标题和关键状态 |
-| 次文字 | `0xFFAAB4B6` | 标签与辅助状态 |
+| Main panel | `0xF0181D20` | High-opacity graphite |
+| Header | `0xF0242B2F` | Subtle contrast with the content area |
+| Border | `0xFF4B565B` | Neutral gray; avoid highlighting the entire border |
+| Accent | `0xFF55C2AA` | Muted teal, only for status and the top line |
+| Primary text | `0xFFF1F5F4` | Titles and key status information |
+| Secondary text | `0xFFAAB4B6` | Labels and supporting status information |
 
-## 布局
+## Layout
 
-- 所有面板通过 `centeredPanel` 先限制尺寸，再计算坐标。
-- 标准外边距为 10px，面板内边距为 12px，按钮/输入框高度为 20px。
-- 统一创建与连接页面使用两栏字段，字段标签与输入框之间保留 2px。
-- 厂商预设使用一个紧凑循环选择器，并且只在高度足够时显示；小 GUI 高度仍保留协议、模型、密钥、地址、身份和操作。
-- 帮助页使用 scissor 裁剪和统一滚动偏移，禁止分别 clamp 每一行文字。
-- 聊天页底部固定为“反射开关、伙伴操作、输入”三行，任何宽度下都不使用左右悬浮按钮组。
+- Use `centeredPanel` to constrain every panel's size before calculating its coordinates.
+- Standard outer margins are 10px, panel padding is 12px, and buttons/input fields are 20px high.
+- The unified creation and connection screen uses two columns of fields, with 2px between each label and its input.
+- Local provider presets (Bonsai/MTP and native Ollama) use one compact cycling selector, shown only when enough height is available. Short GUI layouts must still retain protocol, model, optional local server key, URL, identity, and actions.
+- The help screen uses scissor clipping and a shared scroll offset. Never clamp each text line separately.
+- The chat footer always has three rows: reflex toggles, companion actions, and input. Never use left/right floating button groups at any width.
 
-## 页面职责
+## Screen Responsibilities
 
-| 页面 | 职责 |
+| Screen | Responsibility |
 |---|---|
-| Control Panel | 状态与一级导航 |
-| Configure & Create | 名称、协议适配器、任意模型 ID、API Key、Base URL 和本次创建的思考强度 |
-| Runtime Settings | 温度、默认名称和在线伙伴思考强度 |
-| Appearance | 内置皮肤与玩家皮肤 |
-| Companion Chat | 对话、反射开关和伙伴移除 |
-| Help & Commands | 可滚动命令与按键参考 |
+| Control Panel | Status and top-level navigation |
+| Configure & Create | Name, local protocol adapter (Bonsai/MTP or native Ollama), editable model ID, optional local server API key, local/private-LAN Base URL, and server-default reasoning policy (`auto` or blank) for this creation |
+| Runtime Settings | Temperature, default name, and server-default reasoning policy (`auto`) for online companions |
+| Appearance | Built-in skins and player skins |
+| Companion Chat | Conversation, reflex toggles, and companion removal |
+| Help & Commands | Scrollable command and keybinding reference |
 
-所有可见文本使用 `en_us.json` 和 `zh_cn.json`，不在 Java 布局代码中混用语言或
-`§` 颜色码。
+All visible text uses `en_us.json`. Do not mix languages or embed `§` color codes
+in Java layout code.

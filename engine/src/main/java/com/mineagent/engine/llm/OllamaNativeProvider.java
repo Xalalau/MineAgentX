@@ -12,10 +12,9 @@ import java.util.Map;
 
 /** Ollama's native /api/chat protocol, including its non-streaming tool shape. */
 public final class OllamaNativeProvider extends OpenAICompatibleProvider {
-    private static final com.google.gson.Gson GSON = new com.google.gson.Gson();
     public OllamaNativeProvider() {
         super("ollama", "Ollama Native", "http://127.0.0.1:11434",
-                List.of("llama3.2", "qwen3", "gemma3"), java.util.Set.of());
+                List.of());
     }
 
     @Override public boolean requiresApiKey() { return false; }
@@ -37,6 +36,19 @@ public final class OllamaNativeProvider extends OpenAICompatibleProvider {
                                                      boolean stream, String cacheKey) {
         JsonObject body = super.buildRequestBody(model, messages, tools, temperature,
                 maxTokens, false, null);
+        var nativeMessages = NativeProviderSupport.messages(messages);
+        Map<String, String> toolNames = new java.util.HashMap<>();
+        for (int i = 0; i < messages.size(); i++) {
+            ChatMessage message = messages.get(i);
+            if (message.toolCalls() != null) {
+                for (var call : message.toolCalls()) toolNames.put(call.id(), call.name());
+            }
+            if ("tool".equals(message.role()) && message.toolCallId() != null) {
+                String name = toolNames.get(message.toolCallId());
+                if (name != null) nativeMessages.get(i).getAsJsonObject().addProperty("tool_name", name);
+            }
+        }
+        body.add("messages", nativeMessages);
         // Ollama defaults to NDJSON streaming. Explicitly disable it so the
         // regular HttpResponse parser receives one complete JSON document.
         body.addProperty("stream", false);
@@ -51,24 +63,21 @@ public final class OllamaNativeProvider extends OpenAICompatibleProvider {
 
     @Override protected LLMResponse parseResponse(String json) {
         JsonObject root = JsonParser.parseString(json).getAsJsonObject();
-        JsonObject message = root.has("message") && root.get("message").isJsonObject()
-                ? root.getAsJsonObject("message") : new JsonObject();
+        if (!root.has("done") || !root.get("done").getAsBoolean()
+                || !root.has("message") || !root.get("message").isJsonObject()) {
+            throw new IllegalArgumentException("Ollama returned an incomplete chat response");
+        }
+        JsonObject message = root.getAsJsonObject("message");
         String text = message.has("content") && !message.get("content").isJsonNull()
                 ? message.get("content").getAsString() : null;
         List<ChatMessage.ToolCallRef> calls = new java.util.ArrayList<>();
-        if (message.has("tool_calls") && message.get("tool_calls").isJsonArray()) {
-            for (var item : message.getAsJsonArray("tool_calls")) {
-                if (!item.isJsonObject()) continue;
-                JsonObject function = item.getAsJsonObject().has("function")
-                        ? item.getAsJsonObject().getAsJsonObject("function") : new JsonObject();
-                if (!function.has("name")) continue;
-                String id = item.getAsJsonObject().has("id")
-                        ? item.getAsJsonObject().get("id").getAsString()
-                        : "ollama_call_" + calls.size();
-                    String args = function.has("arguments")
-                        ? NativeProviderSupport.toolArguments(function.get("arguments")) : "{}";
-                calls.add(new ChatMessage.ToolCallRef(id, function.get("name").getAsString(), args));
-            }
+        var seenIds = new java.util.HashSet<String>();
+        for (var item : ProviderSupport.validatedToolCalls(message)) {
+            JsonObject function = item.getAsJsonObject().getAsJsonObject("function");
+            String id = ProviderSupport.toolCallId(item.getAsJsonObject(), seenIds, "ollama_call_");
+            String args = function.has("arguments")
+                    ? NativeProviderSupport.toolArguments(function.get("arguments")) : "{}";
+            calls.add(new ChatMessage.ToolCallRef(id, function.get("name").getAsString(), args));
         }
         int prompt = root.has("prompt_eval_count") ? root.get("prompt_eval_count").getAsInt() : 0;
         int output = root.has("eval_count") ? root.get("eval_count").getAsInt() : 0;

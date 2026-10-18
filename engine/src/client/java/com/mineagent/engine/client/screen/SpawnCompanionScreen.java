@@ -19,13 +19,12 @@ import net.minecraft.util.FormattedCharSequence;
 
 import java.net.URI;
 import java.util.List;
-import java.util.Locale;
 import java.util.UUID;
 
 /**
  * Unified companion identity and LLM connection screen.
  *
- * <p>Provider presets are field fillers, not an allow-list. The protocol
+ * <p>Local presets fill editable model and endpoint fields. The protocol
  * selector chooses one stable wire adapter while model id and base URL remain
  * completely editable for current and future compatible services.
  */
@@ -106,7 +105,7 @@ public class SpawnCompanionScreen extends Screen {
             presetButton = CycleButton.<ProviderPresets.Preset>builder(
                             ProviderPresets.Preset::label)
                     .withValues(ProviderPresets.ALL)
-                    .withInitialValue(ProviderPresets.ALL.get(1))
+                    .withInitialValue(ProviderPresets.BONSAI)
                     .displayOnlyValue()
                     .create(leftX, contentTop + 11, innerWidth, BUTTON_HEIGHT,
                             Component.translatable("screen.mineagent.field.preset"),
@@ -122,7 +121,7 @@ public class SpawnCompanionScreen extends Screen {
                 "screen.mineagent.protocol_hint", "openai-compatible");
 
         modelField = createField(rightX, connectionTop + 11, columnWidth, 256,
-                "screen.mineagent.model_hint", "deepseek-chat");
+                "screen.mineagent.model_hint", "swift-bonsai2-27b-katana-mtp");
 
         int keyRow = connectionTop + fieldStep;
         int revealWidth = Math.min(46, Math.max(34, columnWidth / 4));
@@ -140,7 +139,7 @@ public class SpawnCompanionScreen extends Screen {
 
         baseUrlField = createField(rightX, keyRow + 11, columnWidth,
                 CompanionSetupPayload.MAX_BASE_URL,
-                "screen.mineagent.baseurl_hint", "https://api.deepseek.com");
+                "screen.mineagent.baseurl_hint", "http://127.0.0.1:8899/v1");
 
         identityHeaderY = keyRow + fieldStep + 1;
         identityTop = identityHeaderY + (showPreset ? 16 : 15);
@@ -300,9 +299,7 @@ public class SpawnCompanionScreen extends Screen {
         if (thinkingEffortField == null) return;
         String model = modelField != null ? modelField.getValue() : "";
         ThinkingEffortSpec spec = ThinkingEffortSpec.forModel(model);
-        thinkingEffortField.setHint(spec.supportsEffort()
-                ? Component.literal(spec.hint())
-                : Component.translatable("screen.mineagent.effort_unsupported"));
+        thinkingEffortField.setHint(Component.literal(spec.hint()));
     }
 
     private void toggleApiKeyVisibility() {
@@ -325,10 +322,7 @@ public class SpawnCompanionScreen extends Screen {
             apiKeyField.setHint(Component.translatable("screen.mineagent.apikey_saved_hint"));
             return;
         }
-        String protocol = protocolField == null ? "" : protocolField.getValue().trim();
-        apiKeyField.setHint(Component.translatable("aws-bedrock".equalsIgnoreCase(protocol)
-                ? "screen.mineagent.bedrock_credentials_hint"
-                : "screen.mineagent.apikey_required_hint"));
+        apiKeyField.setHint(Component.literal("Optional local server API key"));
     }
 
     private void doSpawn() {
@@ -336,7 +330,13 @@ public class SpawnCompanionScreen extends Screen {
         String model = modelField.getValue().trim();
         String apiKey = apiKeyField.getValue();
         String baseUrl = baseUrlField.getValue().trim();
-        String effort = thinkingEffortField.getValue().trim().toLowerCase(Locale.ROOT);
+        String effort;
+        try {
+            effort = ThinkingEffortSpec.normalize(thinkingEffortField.getValue());
+        } catch (IllegalArgumentException invalidEffort) {
+            showError("screen.mineagent.error.effort");
+            return;
+        }
 
         if (model.isEmpty()) {
             showError("screen.mineagent.error.model");
@@ -344,11 +344,6 @@ public class SpawnCompanionScreen extends Screen {
         }
         if (!baseUrl.isEmpty() && !isValidBaseUrl(baseUrl)) {
             showError("screen.mineagent.error.baseurl");
-            return;
-        }
-        if (!effort.isEmpty() && !List.of(
-                "off", "low", "medium", "high", "xhigh", "max").contains(effort)) {
-            showError("screen.mineagent.error.effort");
             return;
         }
 

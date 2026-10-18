@@ -6,51 +6,51 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Cognitive Map（认知地图）— 受启于海马体的空间记忆系统。
+ * Cognitive Map — hippocampus-inspired spatial memory.
  *
- * <p>核心功能：
+ * <p>Core capabilities:
  * <ul>
- *   <li><b>空间记忆</b>：按类别记录 POI（resource:iron_ore / hazard:creeper / structure:village）的位置</li>
- *   <li><b>类别检索</b>：支持精确类别（"resource:iron_ore"）和前缀类别（"resource"）查询</li>
- *   <li><b>邻近检索</b>：查找指定半径内的所有记忆点</li>
- *   <li><b>语义摘要</b>：生成供 LLM prompt 使用的紧凑空间记忆文本</li>
+ *   <li><b>Spatial memory</b>: store POI locations by category (resource:iron_ore / hazard:creeper / structure:village)</li>
+ *   <li><b>Category retrieval</b>: exact category ("resource:iron_ore") and prefix ("resource") queries</li>
+ *   <li><b>Proximity retrieval</b>: find memories within a given radius</li>
+ *   <li><b>Semantic summary</b>: compact spatial memory text for LLM prompts</li>
  * </ul>
  *
- * <p><b>改进:</b>
+ * <p><b>Improvements:</b>
  * <ul>
- *   <li>去重机制: 同类别且位置相近的 POI 自动合并强化，避免重复记忆</li>
- *   <li>重要性评分: 稀有资源/危险地点重要性高，淘汰时优先保留</li>
- *   <li>POI验证: 可标记已失效的 POI（如资源已挖走），避免过时信息误导</li>
- *   <li>访问追踪: 记录最近访问时间，淘汰时综合考虑重要性/访问频率/新近度</li>
+ *   <li>Deduplication: reinforce nearby POIs of the same category instead of duplicating memories</li>
+ *   <li>Importance scoring: prefer retaining rare resources and dangerous locations during eviction</li>
+ *   <li>POI verification: invalidate depleted resources so stale information does not mislead</li>
+ *   <li>Visit tracking: combine importance, visit frequency, and recency during eviction</li>
  * </ul>
  *
- * <p>神经科学原理：海马体中的 place cells 编码空间位置，
- * grid cells 提供度量框架。AI 的认知地图结合两者，
- * 支持空间推理（"家在北边"、"矿洞在脚下"）。
+ * <p>Neuroscience basis: hippocampal place cells encode spatial locations,
+ * while grid cells provide a metric framework. This map combines both
+ * to support spatial reasoning ("home is north", "the mine is below").
  *
- * <p>线程安全：所有读写操作都通过 ConcurrentHashMap。
+ * <p>Thread safety: all reads and writes use ConcurrentHashMap.
  */
 public class CognitiveMap {
 
-    /** 默认最大 POI 数量 */
+    /** Default maximum number of POIs */
     private static final int DEFAULT_MAX_POIS = 200;
 
-    /** 去重半径（方块）：同类别 POI 在此半径内视为同一地点 */
+    /** Deduplication radius in blocks: same-category POIs within this radius count as one place */
     private static final int DEDUP_RADIUS = 16;
 
     /**
-     * 兴趣点 (Point of Interest)。
+     * A point of interest (POI).
      *
-     * @param category     类别（如 "resource:iron_ore", "hazard:creeper", "structure:village"）
-     * @param label        显示名称（如 "iron_ore (resource)"）
-     * @param x            X 坐标
-     * @param y            Y 坐标
-     * @param z            Z 坐标
-     * @param timestamp    首次发现时间（毫秒）
-     * @param importance   重要性评分 (0.0-1.0)
-     * @param visitCount   强化/访问次数
-     * @param verified     是否已验证仍存在
-     * @param lastVisitTime 最近强化时间（毫秒）
+     * @param category category (such as "resource:iron_ore", "hazard:creeper", "structure:village")
+     * @param label display name (such as "iron_ore (resource)")
+     * @param x X coordinate
+     * @param y Y coordinate
+     * @param z Z coordinate
+     * @param timestamp first discovery time in milliseconds
+     * @param importance importance score (0.0-1.0)
+     * @param visitCount reinforcement/visit count
+     * @param verified whether the POI is verified to still exist
+     * @param lastVisitTime latest reinforcement time in milliseconds
      */
     public record PointOfInterest(
             String category,
@@ -63,20 +63,20 @@ public class CognitiveMap {
             boolean verified,
             long lastVisitTime
     ) {
-        /** 创建强化副本 */
+        /** Create a reinforced copy */
         PointOfInterest reinforced(long now) {
             return new PointOfInterest(category, label, x, y, z, dimension, timestamp,
                     Math.min(1.0f, importance + 0.05f), visitCount + 1, true, now);
         }
 
-        /** 标记为已失效 */
+        /** Mark as invalid */
         PointOfInterest invalidated() {
             return new PointOfInterest(category, label, x, y, z, dimension, timestamp,
                     importance * 0.3f, visitCount, false, lastVisitTime);
         }
     }
 
-    /** POI 存储：key -> PointOfInterest */
+    /** POI storage: key -> PointOfInterest */
     private final Map<String, PointOfInterest> pois = new ConcurrentHashMap<>();
     private final int maxPOIs;
 
@@ -90,25 +90,24 @@ public class CognitiveMap {
     }
 
     /**
-     * 计算 POI 重要性分数。
-     * 基于类别和标签内容评估：危险 > 稀有资源 > 普通资源 > 实体。
+     * Calculate a POI's importance score.
+     * Based on category and label: hazards > rare resources > common resources > entities.
      */
     private float calculateImportance(String category, String label) {
-        float score = 0.5f; // 基础分
+        float score = 0.5f; // Base score
 
         String lowerCat = category != null ? category.toLowerCase(Locale.ROOT) : "";
         String lowerLabel = label != null ? label.toLowerCase(Locale.ROOT) : "";
         String combined = lowerCat + " " + lowerLabel;
 
-        // 类别基础分
+        // Base score by category
         if (lowerCat.startsWith("hazard")) score += 0.3f;
         else if (lowerCat.startsWith("structure")) score += 0.15f;
         else if (lowerCat.startsWith("resource")) score += 0.1f;
 
-        // 稀有度加分
+        // Rarity bonus
         if (combined.contains("diamond") || combined.contains("emerald")
-                || combined.contains("ancient") || combined.contains("netherite")
-                || combined.contains("钻石")) {
+                || combined.contains("ancient") || combined.contains("netherite")) {
             score += 0.25f;
         } else if (combined.contains("iron") || combined.contains("gold")
                 || combined.contains("village") || combined.contains("chest")
@@ -120,13 +119,13 @@ public class CognitiveMap {
     }
 
     /**
-     * 记录一个 POI（带去重）。
-     * 同类别且距离 <= 16 格的已有 POI 会被强化而非新建。
+     * Record a POI with deduplication.
+     * Reinforce an existing same-category POI within <= 16 blocks instead of creating another.
      *
-     * @param pos       位置
-     * @param category  类别（如 "resource:iron_ore"）
-     * @param label     显示标签
-     * @param timestamp 发现时间（毫秒）
+     * @param pos position
+     * @param category category (such as "resource:iron_ore")
+     * @param label display label
+     * @param timestamp discovery time in milliseconds
      */
     public void recordPoi(BlockPos pos, String category, String label, long timestamp) {
         recordPoi(pos, category, label, "minecraft:overworld", timestamp);
@@ -138,7 +137,7 @@ public class CognitiveMap {
         String cat = category != null ? category.toLowerCase(Locale.ROOT) : "event:unknown";
         String dim = normalizeDimension(dimension);
 
-        // 去重：同类别 + 近距离 → 强化现有 POI
+        // Deduplication: same category + short distance → reinforce the existing POI
         String existingKey = findNearbyKey(
                 cat, dim, pos.getX(), pos.getZ(), DEDUP_RADIUS);
         if (existingKey != null) {
@@ -160,12 +159,12 @@ public class CognitiveMap {
     }
 
     /**
-     * 查找附近的记忆点（只返回已验证的）。
+     * Find nearby memories (verified POIs only).
      *
-     * @param x      中心 X 坐标
-     * @param z      中心 Z 坐标
-     * @param radius 半径（方块）
-     * @return 按重要性降序排列的 POI 列表
+     * @param x center X coordinate
+     * @param z center Z coordinate
+     * @param radius radius in blocks
+     * @return POIs sorted by descending importance
      */
     public List<PointOfInterest> findNearby(int x, int z, int radius) {
         return findNearby(x, z, radius, null);
@@ -189,11 +188,11 @@ public class CognitiveMap {
     }
 
     /**
-     * 按类别查找记忆点（只返回已验证的）。
-     * 支持精确匹配（"resource:iron_ore"）和前缀匹配（"resource" 匹配所有资源）。
+     * Find memories by category (verified POIs only).
+     * Supports exact matches ("resource:iron_ore") and prefixes ("resource" matches all resources).
      *
-     * @param category 类别查询串
-     * @return 按重要性降序排列的 POI 列表
+     * @param category category query
+     * @return POIs sorted by descending importance
      */
     public List<PointOfInterest> findByCategory(String category) {
         return findByCategory(category, null);
@@ -207,7 +206,7 @@ public class CognitiveMap {
             if (!poi.verified()) continue;
             if (dim != null && !dim.equals(poi.dimension())) continue;
             String cat = poi.category();
-            // 精确匹配，或前缀匹配（"resource" 匹配 "resource:iron_ore"）
+            // Exact or prefix match ("resource" matches "resource:iron_ore")
             if (cat.equals(query) || cat.startsWith(query + ":")) {
                 result.add(poi);
             }
@@ -217,7 +216,7 @@ public class CognitiveMap {
     }
 
     /**
-     * 标记指定位置附近的 POI 为已失效（如资源已被挖走）。
+     * Invalidate POIs near a position (for example, after a resource is mined).
      */
     public void invalidateNearby(int x, int z, int radius) {
         invalidateNearby(x, z, radius, null);
@@ -238,8 +237,8 @@ public class CognitiveMap {
     }
 
     /**
-     * 生成供 LLM prompt 使用的空间记忆摘要。
-     * 按类别分组，只显示已验证且重要的 POI，避免 token 膨胀。
+     * Generate a spatial memory summary for the LLM prompt.
+     * Group by category and show only verified, important POIs to limit token use.
      */
     public String summarizeForPrompt() {
         return summarizeForPrompt("", 8);
@@ -260,13 +259,13 @@ public class CognitiveMap {
         if (verified.isEmpty()) return "";
 
         StringBuilder sb = new StringBuilder();
-        sb.append("## 空间记忆\n");
+        sb.append("## Spatial memory\n");
         int shown = 0;
         Map<String, Integer> perTopCategory = new HashMap<>();
         for (ScoredPoi value : verified) {
             if (shown >= Math.min(8, limit)) break;
             PointOfInterest poi = value.poi();
-            // 同一大类（resource/hazard/...）最多显示 3 条，保证多样性
+            // Show at most 3 per broad category (resource/hazard/...) for diversity
             String topCat = poi.category().split(":")[0];
             int count = perTopCategory.getOrDefault(topCat, 0);
             if (count >= 2) continue;
@@ -275,7 +274,7 @@ public class CognitiveMap {
               .append(poi.y()).append(",").append(poi.z()).append(")")
               .append(" [").append(poi.dimension()).append("]");
             if (poi.visitCount() > 2) {
-                sb.append(" [已确认x").append(poi.visitCount()).append("]");
+                sb.append(" [confirmed x").append(poi.visitCount()).append("]");
             }
             sb.append("\n");
             perTopCategory.put(topCat, count + 1);
@@ -294,17 +293,17 @@ public class CognitiveMap {
                 + Math.min(0.08, poi.visitCount() * 0.01);
     }
 
-    // ─── 持久化支持 ───
+    // ─── Persistence support ───
 
     /**
-     * 导出所有 POI（用于持久化保存）。
+     * Export all POIs for persistence.
      */
     public List<PointOfInterest> exportAll() {
         return new ArrayList<>(pois.values());
     }
 
     /**
-     * 导入 POI 列表（用于持久化恢复），替换当前所有数据。
+     * Import persisted POIs, replacing all current data.
      */
     public void importAll(List<PointOfInterest> imported) {
         pois.clear();
@@ -326,14 +325,14 @@ public class CognitiveMap {
         evictIfNeeded();
     }
 
-    // ─── 私有方法 ───
+    // ─── Private methods ───
 
-    /** 生成 POI 存储键 */
+    /** Generate a POI storage key */
     private String poiKey(String category, String dimension, int x, int z) {
         return dimension + ":" + category + ":" + x + "," + z;
     }
 
-    /** 查找同类别且在半径内的已有 POI 键 */
+    /** Find an existing same-category POI key within the radius */
     private String findNearbyKey(String category, String dimension,
                                  int x, int z, int radius) {
         long r2 = (long) radius * radius;
@@ -359,8 +358,8 @@ public class CognitiveMap {
     }
 
     /**
-     * 按综合评分淘汰 POI。
-     * 评分 = 重要性*0.4 + 访问频率*0.2 + 新近度*0.2 + 验证状态*0.2
+     * Evict POIs by combined score.
+     * Score = importance*0.4 + visit frequency*0.2 + recency*0.2 + verification*0.2
      */
     private void evictIfNeeded() {
         while (pois.size() > maxPOIs) {
@@ -371,7 +370,7 @@ public class CognitiveMap {
             for (Map.Entry<String, PointOfInterest> entry : pois.entrySet()) {
                 PointOfInterest poi = entry.getValue();
                 long age = now - poi.lastVisitTime();
-                float recencyFactor = Math.max(0.1f, 1.0f - age / 7200000f); // 2小时衰减
+                float recencyFactor = Math.max(0.1f, 1.0f - age / 7200000f); // Two-hour decay
                 float verifiedBonus = poi.verified() ? 0.2f : 0f;
                 float score = poi.importance() * 0.4f
                         + Math.min(poi.visitCount() / 10f, 1.0f) * 0.2f
@@ -392,12 +391,12 @@ public class CognitiveMap {
         }
     }
 
-    /** 获取 POI 数量 */
+    /** Get the number of POIs */
     public int size() {
         return pois.size();
     }
 
-    /** 清空所有数据 */
+    /** Clear all data */
     public void clear() {
         pois.clear();
     }

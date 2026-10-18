@@ -9,7 +9,7 @@ import net.minecraft.util.FormattedCharSequence;
 import java.util.List;
 
 /**
- * Shared drawing and layout primitives for the Fabric and NeoForge clients.
+ * Shared drawing and layout primitives for the NeoForge client.
  *
  * <p>The UI deliberately uses one opaque graphite surface with a quiet accent
  * line. Earlier screens combined a gold double border, a title band, corner
