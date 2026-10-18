@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Do not report vulnerabilities, API keys, or private logs in a public issue. Use a private [GitHub Security Advisory](https://github.com/bingdongni/MineAgent/security/advisories/new) and include:
+Do not report vulnerabilities, API keys, or private logs in a public issue. Use a private [GitHub Security Advisory](https://github.com/Xalalau/MineAgentX/security/advisories/new) and include:
 
 - affected MineAgent version and loader;
 - impact and realistic attack scenario;
@@ -19,8 +19,8 @@ MineAgent currently stores LLM API keys as plain text in:
 - `config/mineagent.json`;
 - `<world>/data/mineagent_companions.json`.
 
-Do not share those files or unreviewed world archives. If a key is exposed, revoke it at the provider immediately, generate a new key, and replace all stored copies. Conversation and game context may be transmitted to the configured LLM provider and is subject to that provider's security and privacy terms.
+Do not share those files or unreviewed world archives. If a key is exposed, revoke it at the provider immediately, generate a new key, and replace all stored copies. Conversation and game context are transmitted to the configured local inference service. Restrict that service to trusted infrastructure and review its logging and access controls.
 
 ## Supported versions
 
-Security fixes target the latest published release. Older alpha builds may receive no backports. NeoForge is experimental and may have platform-specific security or lifecycle gaps not present on the supported Fabric build.
+Security fixes target the current MineAgentX code. Older alpha builds may receive no backports. Minecraft 1.21.1 with NeoForge 21.1.x is the only loader target; game-world behavior still requires live validation.

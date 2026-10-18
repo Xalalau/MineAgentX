@@ -1,233 +1,69 @@
-# MineAgent
+# MineAgentX
 
-[English](README.en.md) | 简体中文
+A local-LLM Minecraft companion for **Minecraft 1.21.1, NeoForge 21.1.x, and Java 21**.
 
-[![Build](https://github.com/bingdongni/MineAgent/actions/workflows/build.yml/badge.svg)](https://github.com/bingdongni/MineAgent/actions/workflows/build.yml)
-[![License: LGPL-3.0-only](https://img.shields.io/badge/License-LGPL--3.0--only-blue.svg)](LICENSE)
+MineAgentX is derived from [bingdongni/MineAgent](https://github.com/bingdongni/MineAgent), starting at commit `701250a950154667212d3ae1be3b3197e9ce9470`. This fork supports **NeoForge only**, **local inference only**, and English project text initially. The mod ID and Java package namespace remain `mineagent` for compatibility.
 
-MineAgent 是面向 Minecraft 1.21.1 的 LLM 驱动的 AI 伴游模组。它在服务端创建无真实网络连接的假玩家，并让 AI 通过移动、采集、挖掘、建造、战斗、合成、物品管理和生存本能与世界交互。
+## Capabilities
 
-## v0.4.0：阶段 0–9 认知、执行与协作闭环
+See [CAPABILITIES.md](CAPABILITIES.md) for the complete tool inventory, survival behavior, planning, memory, teamwork, interface, commands, and explicit limitations. The companion is a server-side fake player: it navigates, gathers, mines, places blocks, fights, crafts, and manages items through validated actions.
 
-这一版按阶段 0–9 收口为一个可验证的工程闭环：
+This is alpha software. Back up valued worlds. Source code, tests, and a successful build do not prove gameplay reliability, universal mod compatibility, or autonomous game completion.
 
-- **阶段 0/1 — Provider 与 Responses 协商**：统一 `api/llm` 契约，原生 Responses/function-call/opaque reasoning/compaction 状态，能力协商、前一响应恢复、404/405 Chat Completions 回退和每个 companion 独立会话。
-- **阶段 2 — 认知状态与持久化**：`CognitiveState` journal/projection/checkpoint、分层记忆、迁移与损坏文件隔离；持久化只恢复经验证证据，不恢复跨重启的身体所有权。
-- **阶段 3 — 世界事实与动作事务**：语义世界模型、动作事务账本、工具前后置条件和 exactly-once 回调；移动、挖掘、放置、装备、转移、复杂使用和战斗以服务器状态验收。
-- **阶段 4 — 规划与恢复**：战略验收条件、滚动计划、后缀修复、资源预留、资产复用、备用计划和停滞检测；旧计划不会在 reset 或重启后作为“幽灵状态”继续驱动动作。
-- **阶段 5 — 陌生机制适应**：环境/注册表指纹、受风险与补偿约束的单步探针、竞争假设、反例失效和可执行适配技能。
-- **阶段 6 — 分层检索**：工作、情节、语义、程序和团队记忆按目标相关性、可靠性、衰减和环境范围召回，重复心跳不会伪造额外证据。
-- **阶段 7 — 上下文与效率**：稳定 prompt 前缀、Responses 增量历史、缓存键、动态工具面、输出预算、deadline/circuit-breaker 以及本地 token/cache/action 指标。
-- **阶段 8 — 团队协作**：owner-scoped 黑板、目标承诺、角色、支持请求、TTL 租约、失联/死亡/销毁回收和重复目标检测。
-- **阶段 9 — 验证与发布**：Fabric 自动测试、API/memory/planning/skill/transaction/team/telemetry 回归、JDK 21 Fabric+NeoForge 构建与双加载器产物。
+## Local inference: Ollama or Bonsai/MTP
 
-这些是可验证的代码级能力，不等于已经证明真人级 AGI、任意模组 100% 兼容或绝对通关率。Fabric 是正式支持平台，NeoForge 仍为实验性平台；从零击杀末影龙、长期生存和整合包完成率必须由用户在真实世界中长程测试。
+Choose either **native Ollama** (`POST /api/chat`, commonly at `http://127.0.0.1:11434`) or **Bonsai/MTP** through the OpenAI-compatible protocol. Configure the actual Ollama model ID; no installed model is assumed.
 
-## v0.3.6：独立游戏模式控制
+The documented Bonsai deployment uses:
 
-- “配置并创建 AI 伙伴”页面新增游戏模式选择，提供生存、创造、冒险和极限四种模式；未选择、空值以及旧版调用均明确默认为生存。
-- 伙伴聊天页新增当前伙伴选择器和实时游戏模式选择器。最多三个伙伴可以分别设置并持久化模式，关闭页面或重新进入世界后不会相互覆盖。
-- 生存、创造和冒险直接使用 Vanilla `GameType`、能力同步与交互限制。此前 `FakePlayerGameMode` 会把实际模式硬编码回生存的问题已修复。
-- Minecraft 的极限模式原本是世界级规则，MineAgent 将其准确实现为每个伙伴独立的生存模式加永久死亡约束。极限伙伴死亡后会永久锁定，不能切换模式或被 `/mineagent respawn` 绕过；只能保留/移除死亡伙伴后创建新的 AI 伙伴。
-- 游戏模式切换只接受拥有该伙伴的人类客户端发出的服务端校验请求。LLM 工具集中没有切换入口，AI 只能感知当前模式，不能自行修改。
+- API root: `http://127.0.0.1:8899/v1`.
+- Model: `swift-bonsai2-27b-katana-mtp`.
+- Protocol: OpenAI-compatible `POST /v1/chat/completions` with tool calling.
+- External host launcher directory: `<local-path>`.
 
-## v0.3.5：统一配置与开放模型接入
+The mod connects to the HTTP service. It does not open that directory, start the model, or change the launcher, MTP, context allocation, or template settings. Loopback refers to the machine running the Minecraft server. If inference runs on another machine on your private network, configure its reachable local address instead.
 
-- “创建 AI 伙伴”和“模型连接”已合并为一个页面，可一次填写伙伴名称、协议适配器、任意模型 ID、API Key、Base URL 和思考强度后保存并创建；主菜单不再保留重复入口。
-- 厂商按钮改为一个紧凑的可选预设菜单。预设只负责填充字段，不是模型白名单；模型 ID、接口地址和已注册适配器 ID 始终可以自由输入。
-- 新增 `openai-compatible`、`anthropic-compatible` 和 `gemini-compatible` 三个稳定协议 ID，原有九个厂商 ID 继续作为兼容别名，旧配置和已保存伙伴无需迁移。
-- 配置与创建通过专用网络 payload 原子提交，不再把 API Key 放进 slash 命令。服务端只向页面返回非敏感摘要，创建失败不会留下半更新配置；连接目标改变时也不会把旧密钥自动发送到新地址。
-- OpenAI 兼容适配器支持无鉴权的本地 Ollama、LM Studio、vLLM 等服务；官方或中转端点仍会按自身鉴权规则拒绝缺失/错误密钥，Anthropic 与 Gemini 原生协议会在请求前校验密钥。完整 endpoint、`/v1` 根地址和主机根地址都会规范化为唯一请求路径。
-- Anthropic Messages 适配器默认使用官方 `x-api-key`，兼容中转可在密钥字段使用显式 `bearer:` 或 `api-key:` 前缀；Gemini 同时发送官方支持的 `x-goog-api-key` header 和兼容的 query key。
-- 新增 `aws-bedrock`（别名 `bedrock`）适配器，使用 AWS Bedrock Runtime Converse 的统一消息和工具协议。官方 endpoint 使用 SigV4；API Key 字段可填写 JSON AWS 凭据（`accessKeyId`、`secretAccessKey`、可选 `sessionToken`、`region`），或 `accessKeyId|secretAccessKey|sessionToken|region`。自定义中转仅支持显式 `bearer:` / `api-key:` 令牌，且不会把令牌写入日志。Bedrock 的模型 ID 保持开放，不假设各厂商私有 `InvokeModel` 请求体。
 
-### 模型与 API 兼容范围
+## Build and test
 
-| 适配器 ID | 内置协议 | 可接入范围 |
-| --- | --- | --- |
-| `openai-compatible` | Chat Completions + function calling | OpenAI 兼容的官方接口、中转、聚合平台和本地服务 |
-| `anthropic-compatible` | Anthropic Messages + tools | Anthropic 官方接口及保持该协议与鉴权语义的中转 |
-| `gemini-compatible` | Gemini `generateContent` + function calling | Google 官方接口及保持该协议语义的中转 |
-| `aws-bedrock`（`bedrock`） | AWS Runtime Converse + tool use | Bedrock 官方 endpoint（SigV4）或明确支持 Converse 的中转 |
-| `aws-bedrock-invoke` | 常见 Bedrock `InvokeModel` profile（Anthropic、Nova、Mistral、Llama、Cohere、Titan） | 对应模型的 Bedrock 官方 endpoint（SigV4）或明确支持该 profile 的中转 |
-| `azure-openai` | Azure OpenAI deployment + `api-version` Chat Completions | Azure OpenAI 官方 endpoint（API key 或 Entra bearer）及保持该路由的中转 |
-| `vertex-ai` | Vertex AI Gemini `generateContent` + OAuth/service account | Google Vertex 官方 endpoint（OAuth）及保持该协议的中转 |
-| `cohere` | Cohere Chat API v2 | Cohere 官方 `/v2/chat` 及保持该协议的中转 |
-| `ai21` | AI21 Jamba Studio Chat Completions | AI21 Studio 官方 endpoint及保持该协议的中转 |
-| `baidu-qianfan` | 千帆 ERNIE RPC chat + OAuth | 百度千帆官方 endpoint（access token 或 AK/SK） |
-| `tencent-hunyuan` | 腾讯混元 ChatCompletions + TC3 签名 | 腾讯云官方 endpoint（SecretId/SecretKey）及保持该协议的中转 |
-| `bytedance-ark` | 火山方舟 Ark v3 Chat Completions | Ark 官方 endpoint 及保持该协议的中转 |
-| `ollama` | Ollama 原生 `/api/chat`（非 NDJSON） | 本机或自托管 Ollama 服务 |
-| 自定义注册 ID | `LLMProviderRegistry` 扩展 | 由其他模组或后续版本提供的私有/新协议适配器 |
+Install JDK 21 and set `JAVA_HOME` as needed:
 
-MineAgent 不按型号维护允许列表，因此兼容端点发布的新模型通常只需输入新模型 ID。`InvokeModel` 只声明表中列出的稳定 profile；Bedrock 其他私有请求体、厂商新版本字段以及尚未公开的未来私有 API 无法由当前版本预先保证，必须增加对应 profile 或注册 `LLMProvider` 适配器。这是协议事实边界，不是厂商名称限制。
-
-## v0.3.1：复杂单人任务闭环稳定性
-
-- 长程计划现在区分战术步骤完成与战略目标验收。`goal_conditions` 使用实时语义世界事实验证库存、状态或其他可观察后置条件；缺少最终证据时计划保持在 `verifying`，不会因为最后一个动作返回成功就提前宣布整个目标完成。
-- 滚动重规划使用 `repair` 只替换失败后缀，保留已有执行证据的检查点、依赖身份、硬约束和目标验收条件；恢复动作重新绑定原里程碑，重启后不会恢复虚假的身体所有权或连续失败窗口。
-- 新增 `plan_acquisition`，按实时背包、已实际观察的容器/掉落物和服务器注册配方，递归展开有界物品依赖 DAG，计算配方产量、批次数、可替代原料和计划余量，并把未知机器或外部工作站条件保留为待观察叶节点。
-- 新增通用 `use_item` 异步原语，覆盖投掷、饮用/食用、蓄力释放、主副手和三维瞄准；所有行为经过 Vanilla `ServerPlayerGameMode`，生存链抢占会重建连续使用状态而不会把中断误报为成功。
-- 新增 `wait_for` 条件任务，可有界等待时间、库存、语义事实、GUI 槽位、维度、方块和实体出现/消失。异步机器加工与维度转换因此拥有真实稳定窗口、超时诊断和调度器终态，而不是用一段“等待”文本结束行动。
-- 计划、等待和物品使用新增严格参数与生命周期保护；计划图不能在身体任务或技能仍运行时被改写。记忆格式升级为 10，并保持 v1-v9 计划文件兼容。
-
-这些改动提供普通生存、创造、冒险及模组任务所需的通用长程闭环，而不是硬编码某条末影龙通关脚本。实际完成率仍取决于所选 LLM、世界条件、模组可观察契约和服务器规则；发布构建不能替代长时间真实游戏验证。
-
-## v0.3.0：L4 陌生环境与模组机制自适应
-
-- MineAgent 会从真实检查结果中为陌生方块、物品、菜单、配方、实体、方块状态和 GUI 槽位布局建立有界结构化档案；它不依赖、也不会假装能够读取任意模组的私有实现 API。
-- 受控实验会在动作前冻结语义基线，只执行一个经过调度器准入的探针，并要求出现更新且有关联 ID 的真实状态增量。动作执行失败仍记为“证据不足”，动作后状态与基线相同也不会被误学为因果成功。
-- 探针选择同时考虑预期信息增益、资源与时间成本、风险、可逆性和按对象持久化的实验预算。高风险探针直接拒绝；中风险探针必须提供明确且可验证的补偿动作；不可无损回滚的合成不会用于自主实验。
-- 同一对象可以保留相互竞争的假设并累计支持与反例。规则至少需要两个独立情境的支持才能确认；反例会降低置信度，并立即使已生成的适配器失效。
-- 已确认规则绑定 Minecraft、加载器、模组版本集合和注册表摘要指纹。环境变化后旧规则进入待复核状态；环境兼容时知识可跨重启恢复，但不会恢复正在进行的实验或身体任务所有权。
-- 已确认的动作规则会编译为带后置条件的普通技能；复用仍必须经过 `SkillRuntime`、任务调度器、生存优先级和主人安全约束。每次提示只召回与当前目标相关的少量规则。
-
-该能力是在可观察游戏契约上的黑盒自适应，并不等于已经验证所有模组、竞技服务器或任意私有模组 API。Fabric 为正式支持平台；NeoForge 在扩大实机覆盖前仍为实验性平台。
-
-## v0.2.6：长程记忆、实时决策与 Token 效率
-
-- 将主人最新指令、战略目标和当前计划步骤组合成统一检索查询，只注入相关的语义结果、已验证经历、认知地图和位置事件，减少无关记忆占用上下文。
-- 主人目标和真实世界动作终态会跨重启保存；普通扫描、实时背包投影和资产派生事实保持易失，旧版 `asset:*` 记忆污染会在加载迁移时过滤。
-- 相同阻塞心跳、认知事件和滚动重规划只触发一次决策，常规身体日志不再隐式启动 LLM 请求，避免停滞时连续中断 HTTP 调用。
-- 动态工具在当前主人目标期间保持暴露，工具发现不再重复完整 schema；常规中间轮限制输出预算，大型建造和首轮战略规划保留完整预算。
-- 已学习技能必须包含真实动作并通过 JSON、工具存在性和可执行性校验；查询技能时只返回与当前目标最相关的少量结果。
-
-## v0.2.5：L3 闭环智能架构
-
-- 闭环技能运行时逐步执行已学习技能，并在每一步检查前置条件、等待权威任务终态、验证语义后置条件；失败时停止并请求重规划，不会盲目重放剩余动作。
-- 事件化语义世界模型统一记录物品、设施、实体、动作和结果，保留时间、来源、置信度、有效期及关联 ID；过期观察不会被当作永久事实。
-- 分层滚动规划器维护战略目标、有限战术窗口和当前执行状态，只修复失效的计划后缀，并保留已有执行证据的步骤。
-- 陌生机制探索器通过单个低风险或中风险、可证伪的实验学习未知方块、物品、GUI、配方和模组规则；模糊结果只记为“证据不足”。
-- 同一计划中的多轮已验证动作会在整个计划成功后合成为可复用技能，失败轨迹不会污染或覆盖已验证技能。
-
-> [!WARNING]
-> 项目目前处于 Alpha 阶段。请先备份重要世界，并预期 AI 行为、模型输出和实验性平台支持仍可能出现问题。
-
-## 平台支持
-
-| 加载器 | 状态 | 说明 |
-| --- | --- | --- |
-| Fabric | 正式支持 | 已实际构建并在游戏中运行；包含完整客户端菜单、聊天、状态 HUD 和调试视图。 |
-| NeoForge | 实验性 | 可构建并随 Release 提供；已共享完整客户端菜单、聊天、HUD、调试视图和网络功能，但实机覆盖仍少于 Fabric。 |
-
-两个 JAR 会附在同一个 GitHub Release 中。一次游戏实例只能安装与其加载器对应的一个 JAR，不能同时安装 Fabric 和 NeoForge 版本。
-
-## 主要能力
-
-- LLM 驱动的聊天、工具调用和持续任务规划
-- 多频率实时认知：20 Hz 身体与生存反射、5 Hz 战术情境刷新，只有开放式重规划才请求 LLM
-- 带硬约束、执行证据、显式依赖和环检测的滚动计划图
-- 假玩家移动、路径规划、清障、搭桥、挖掘、放置和战斗
-- 饥饿、呼吸、落地水桶、怪物防御、拾取、跟随和解卡等生存链
-- 认知地图、位置事件、重要性学习、相关经验检索和带真实参数的技能轨迹
-- 多伴游实时团队黑板：角色承诺、重复任务检测和按需支援，不再让普通对话唤醒所有 AI
-- 统一世界资产索引：追踪背包、装备、已检查容器、掉落物和已知设施，并按物品或能力决定复用、取回或制造
-- 基于游戏实时注册表的配方发现与模组物品兼容，不依赖固定的原版物品清单
-- 多伴游管理、皮肤、状态 HUD、路径与视觉调试
-- 任意模型 ID，以及 OpenAI Chat Completions、Anthropic Messages、Gemini `generateContent` 兼容接口和可注册的第三方协议适配器
-
-## 安装
-
-### Fabric（推荐）
-
-1. 安装 Java 21、Minecraft 1.21.1、Fabric Loader 0.15 或更高版本。
-2. 安装适用于 Minecraft 1.21.1 的 Fabric API。
-3. 从 [Releases](https://github.com/bingdongni/MineAgent/releases) 下载 `mineagent-fabric-<版本>.jar`。
-4. 将 JAR 放入 Minecraft 的 `mods` 目录并启动游戏。
-
-### NeoForge（实验性）
-
-1. 安装 Java 21、Minecraft 1.21.1 和 NeoForge 21.1.x。
-2. 下载 `mineagent-neoforge-<版本>.jar` 并放入 `mods` 目录。
-3. 不要安装 Fabric API 或 Fabric 版本的 MineAgent。
-4. 建议使用测试世界，并在反馈中注明 NeoForge、加载器版本和日志。
-
-## 快速开始
-
-首次启动会生成 `config/mineagent.json`。按 `M` 打开主菜单，进入“配置并创建 AI 伙伴”，一次填写协议、模型、接口、密钥和游戏模式即可创建。按 `C` 打开伙伴聊天后，可选择任一在线伙伴并随时调整其独立游戏模式。也可以先手动配置文件，再在游戏内运行：
-
-```text
-/mineagent quick
+```sh
+python scripts/check_project.py
+./gradlew :neoforge:test :neoforge:build
 ```
 
-Fabric 和 NeoForge 用户都可以按 `M` 打开主菜单完成配置和创建。常用命令：
+On Windows, use `gradlew.bat`. Gradle downloads its build dependencies. The output is under `neoforge/build/libs/`. No Fabric loader or Fabric API is required or supported.
 
-```text
-/mineagent help
-/mineagent providers
-/mineagent models <provider>
-/mineagent quick [name] [effort]
-/mineagent list
-/mineagent remove
-/mineagent config
-/mineagent reload
-```
+## Install and use
 
-默认按键（Fabric 与 NeoForge）：
+1. Install Minecraft 1.21.1, Java 21, and NeoForge 21.1.x.
+2. Build the NeoForge JAR and install it in the relevant client/server `mods` directories.
+3. Start your local model service using its existing documented procedure.
+4. Press `M` to configure/create a companion, or use `/mineagent quick` with saved configuration.
+5. Press `C` for companion chat. Other default keys: `H` status HUD, `P` paths, `V` perception overlay, `N` labels.
 
-| 按键 | 功能 |
+The three-companions-per-owner limit remains; the inherited code also requires distinct model identifiers for companions belonging to the same owner.
+
+## Modules
+
+| Module | Purpose |
 | --- | --- |
-| `M` | 打开 MineAgent 主菜单 |
-| `C` | 打开伴游聊天 |
-| `H` | 显示或隐藏状态 HUD |
-| `P` | 显示或隐藏路径调试 |
-| `V` | 显示或隐藏视觉范围 |
-| `N` | 显示或隐藏伴游标签 |
+| `api` | Shared tool, task, model, configuration, and networking contracts. |
+| `engine` | Agent loop, fake player, movement, survival, memory, and shared client UI. |
+| `tools` | AI-callable tools and instructional skill documents. |
+| `neoforge` | Only loader integration, packaging, networking, client bootstrap, and regression tests. |
 
-按键可在 Minecraft 控制设置中重新绑定。
+## Privacy and security
 
-## 隐私、密钥与费用
+Chat and world context are sent to the configured local inference service. Runtime configuration and companion saves can contain plaintext credentials if supplied. Never publish these files, private logs, chat, or world saves. See [SECURITY.md](SECURITY.md).
 
-MineAgent 会把 API Key 以明文保存在以下位置，以便配置和恢复伴游：
+## Development status
 
-- `config/mineagent.json`
-- `<世界目录>/data/mineagent_companions.json`
+See [PROGRESS.md](PROGRESS.md) for the current preparation state and actual verification evidence. The construction design/preview/revision environment and additional configurable language layers are future work, not existing capabilities.
 
-不要提交、分享或上传这些文件，也不要在公开 Issue 中粘贴未检查的完整配置、世界存档或日志。密钥泄漏后应立即在对应 LLM 服务商处撤销并重新生成。
+## License and attribution
 
-对话和游戏上下文会发送到你选择的 LLM 提供者。API 请求可能产生费用，并受该服务商的隐私政策、速率限制和使用条款约束。MineAgent 不提供免费额度，也无法保证模型输出始终正确或安全。
+Original MineAgent copyright (c) 2026 bingdongni. Distributed under **LGPL-3.0-only**; see [LICENSE](LICENSE). Preserve upstream attribution when modifying or distributing this fork.
 
-## 从源码构建
-
-要求：JDK 21。仓库自带 Gradle Wrapper，无需单独安装 Gradle。
-
-Windows PowerShell：
-
-```powershell
-cd MineAgent
-$env:JAVA_HOME = 'C:\Path\To\jdk-21'
-.\gradlew.bat :fabric:build :neoforge:build
-```
-
-Linux/macOS：
-
-```bash
-./gradlew :fabric:build :neoforge:build
-```
-
-构建产物：
-
-- `fabric/build/libs/mineagent-fabric-0.4.0.jar`
-- `neoforge/build/libs/mineagent-neoforge-0.4.0.jar`
-
-## 项目结构
-
-| 模块 | 职责 |
-| --- | --- |
-| `api` | 平台无关的工具、任务、配置、LLM 和网络契约 |
-| `engine` | Agent 循环、假玩家、路径规划、生存链、任务和记忆 |
-| `tools` | LLM 可调用工具和内置技能资料 |
-| `fabric` | Fabric 启动、网络、Mixin 与共享客户端界面的平台接入 |
-| `neoforge` | NeoForge 实验性启动、生命周期、网络与共享客户端界面的平台接入 |
-
-## 参与贡献
-
-提交问题前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)，并使用 Issue 模板提供可复现步骤和已脱敏日志。安全漏洞请按 [SECURITY.md](SECURITY.md) 私下报告，不要创建公开 Issue。
-
-## 许可证与声明
-
-Copyright (c) 2026 bingdongni。
-
-本项目以 [GNU Lesser General Public License v3.0 only](LICENSE) 发布，SPDX 标识符为 `LGPL-3.0-only`。
-
-MineAgent 是非官方社区项目，与 Mojang Studios 或 Microsoft 无关联、授权或认可。“Minecraft”是其各自权利人的商标。第三方 LLM 服务的名称和商标归其各自所有者。
+This is an unofficial community project, not affiliated with or endorsed by Mojang Studios or Microsoft.

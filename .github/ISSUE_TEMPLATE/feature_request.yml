@@ -10,9 +10,9 @@ body:
       options:
         - Agent behavior
         - Pathfinding and actions
-        - LLM provider
-        - Fabric client UI
-        - NeoForge compatibility
+        - Local inference
+        - Client UI
+        - NeoForge integration
         - Tools and tasks
         - Memory
         - Documentation

@@ -13,8 +13,7 @@ body:
     attributes:
       label: Mod loader
       options:
-        - Fabric (supported)
-        - NeoForge (experimental)
+        - NeoForge
     validations:
       required: true
 
@@ -30,7 +29,7 @@ body:
     id: environment
     attributes:
       label: Minecraft, loader, and Java versions
-      placeholder: Minecraft 1.21.1, Fabric Loader 0.15.11, Java 21.0.x
+      placeholder: Minecraft 1.21.1, NeoForge 21.1.x, Java 21.0.x
     validations:
       required: true
 

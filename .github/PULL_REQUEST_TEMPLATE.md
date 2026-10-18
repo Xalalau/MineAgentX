@@ -9,8 +9,8 @@ Describe the root cause and the focused change.
 
 ## Verification
 
-- [ ] `./gradlew :fabric:build`
-- [ ] `./gradlew :neoforge:build`
+- [ ] `python scripts/check_project.py`
+- [ ] `./gradlew :neoforge:test :neoforge:build`
 - [ ] Live-game test completed where required
 - [ ] No API keys, worlds, private logs, or generated configuration included
 
