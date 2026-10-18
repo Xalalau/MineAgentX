@@ -76,7 +76,7 @@ All paths below are relative to this repository unless explicitly labeled extern
 - Loopback refers to the machine running the Minecraft server, not necessarily the player's client or this assistant's container. Local/private-LAN endpoint validation must remain consistent in presets, spawn/configuration, and request execution.
 - Preserve the server's automatic reasoning/template policy. Do not inject cloud-only reasoning fields, launcher MTP flags, or assume a model's advertised maximum is the live context allocation.
 - Check timeouts end to end: provider HTTP defaults, `LLMRequest`, and the explicit `AgentLoop` deadline can differ. Do not claim a longer deadline is implemented merely because one layer changed.
-- The external launcher reference is `<local-path>`. The mod connects over HTTP; it does not load files from that directory or start/modify the launcher.
+- The external launcher reference is `<local-launcher>`. The mod connects over HTTP; it does not load files from that directory or start/modify the launcher.
 - Never load or download models, alter the external launcher, or treat an unrelated installed model as a suitable companion model without authorization.
 - Protocol fixtures prove request/response handling, not real model quality, MTP operation, or in-world behavior.
 
@@ -113,9 +113,9 @@ Before calling a change done:
 - The remote originally contained a different Minecraft 1.20.1 project. Its history was preserved by an explicit `ours` merge while retaining this NeoForge codebase. Do not reimport that old tree or assume renaming a branch fixes divergence. Fetch/inspect ancestry before future history changes; never silently reset/rebase away new work.
 - Do not invent the user's commit identity. Use an explicitly configured identity or transparently identified assistant commits; the existing local assistant commits use `Hermes Agent <hermes@localhost>`.
 
-## Workspace, runtime data, and reference project
+## Runtime data and privacy
 
-- Do not modify or install the legacy mod merely to compare it. Distinguish slash commands, exact chat shortcuts, model-driven requests, registered internal actions, and executor-only aliases.
 - Runtime configuration, companion saves (`<world>/data/mineagent_companions.json`), and memories (`<world>/mineagent_memory/`) are user data. Never commit actual keys, private chat, logs, worlds, or inference state. Do not inspect unrelated runtime files.
-- Project-owned temporary artifacts belong inside this project and must be minimal. `.tools/` and generated build outputs are ignored. `<local-ai-scratch>` is reserved exclusively for the local AI; other agents must not use or inspect it without explicit authorization.
-- Personal-host access outside mounted paths requires the user-enabled temporary bridge and `/opt/data/host-access/ssh-host`. Do not bypass that boundary. No current task authorizes modifying or restarting the personal Minecraft server or Bonsai launcher.
+- Keep task-owned temporary artifacts minimal and ignored. `.tools/` and generated build outputs are not public deliverables.
+- Never access, modify, or restart an external model launcher or game server without explicit authorization.
+- Never put personal names, machine usernames, personal filesystem paths, or private-repository references in project text, public artifacts, or commit messages. Use repository-relative references and generic setup instructions. Redact diagnostics before copying them; verify reachable Git history as well as current files after privacy corrections.

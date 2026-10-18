@@ -6,7 +6,7 @@ The following is an English rendering of the assistant's last checkpoint before 
 
 > I checked the files and Git state. I am aligned with the current request:
 >
-> - The new base being evaluated was `<upstream-checkout>`, already cloned from upstream on `main`, commit `701250a950154667212d3ae1be3b3197e9ce9470`, with no local changes.
+> - The new base had been cloned from upstream on `main`, commit `701250a950154667212d3ae1be3b3197e9ce9470`, with no local changes.
 >
 > The direction is Minecraft 1.21.1 with NeoForge as the primary platform, English as the base with configurable localization, compatibility with your Bonsai/MTP setup, and more decisions made by the AI. Do not automatically carry over phrase shortcuts, predefined personalities or spontaneous lines, dedicated home/bed commands, or a ready-made cottage. For construction, the desired cycle is design, visualize, revise, convert coordinates, and execute in the game.
 >
@@ -177,7 +177,7 @@ MineAgentX supports two local inference backends: **native Ollama** and **Bonsai
 ### Bonsai/MTP
 
 
-- Launcher directory on the owner's host: `<local-path>`.
+- Launcher directory on the owner's host: `<local-launcher>`.
 - Documented launcher command: `./scripts/start.sh`, with the Katana profile as its recorded default.
 - OpenAI-compatible API root: `http://127.0.0.1:8899/v1`.
 - Recorded model alias: `swift-bonsai2-27b-katana-mtp`.

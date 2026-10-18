@@ -19,7 +19,7 @@ The documented Bonsai deployment uses:
 - API root: `http://127.0.0.1:8899/v1`.
 - Model: `swift-bonsai2-27b-katana-mtp`.
 - Protocol: OpenAI-compatible `POST /v1/chat/completions` with tool calling.
-- External host launcher directory: `<local-path>`.
+- External host launcher directory: `<local-launcher>`.
 
 The mod connects to the HTTP service. It does not open that directory, start the model, or change the launcher, MTP, context allocation, or template settings. Loopback refers to the machine running the Minecraft server. If inference runs on another machine on your private network, configure its reachable local address instead.
 

@@ -29,6 +29,25 @@ class ProjectContractTests(unittest.TestCase):
                     hits.append(f"{name}:{number}")
         self.assertFalse(hits, f"{len(hits)} CJK lines remain; first locations: " + ", ".join(hits[:20]))
 
+    def test_no_personal_machine_paths(self):
+        private_path = re.compile(r"/(?:home|Users)/[^\s`\"<>]+|/opt/data/" r"workspace(?:/|\b)")
+        names = subprocess.check_output(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+            cwd=ROOT,
+        ).decode().split("\0")
+        hits = []
+        for name in names:
+            path = ROOT / name
+            if not name or not path.is_file():
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                continue
+            if private_path.search(text):
+                hits.append(name)
+        self.assertFalse(hits, "Personal machine paths must not be published: " + ", ".join(hits))
+
     def test_capabilities_documents_every_registered_tool(self):
         tools = ROOT / "tools/src/main/java/com/mineagent/tools"
         registration = (tools / "ToolRegistration.java").read_text()
