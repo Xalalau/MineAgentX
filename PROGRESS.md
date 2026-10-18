@@ -4,7 +4,8 @@
 
 - Base: bingdongni/MineAgent, commit `701250a950154667212d3ae1be3b3197e9ce9470`.
 - Local checkout renamed to `.`.
-- `origin` now points to `https://github.com/Xalalau/MineAgentX.git`; stale branch tracking removed. Latest user instruction: prepare incremental local commits only; the user will push. Do not push, restart authentication, force-push, or replace the existing `master` history.
+- Local branch is `master`, tracking `origin/master`; local `origin/HEAD` points to `origin/master`. After the user explicitly requested fixing non-fast-forward/divergent histories, merge `cb93195` joined the unrelated histories with the `ours` strategy: parents `c7a47e3` (new NeoForge codebase) and `b7c6719` (old remote tip). Verified committed tree unchanged and remote tip now an ancestor. Existing new commits and uncommitted work remain intact. A normal fast-forward push is now possible relative to the fetched remote tip; no push was performed.
+- `origin` now points to `https://github.com/Xalalau/MineAgentX.git`; stale branch tracking removed. Latest user instruction: prepare incremental local commits only; the user will push. Do not push, restart authentication, or force-push. Reconciliation preserves the existing remote history as an ancestor without importing the old 1.20.1 project content.
 - Keep Minecraft 1.21.1, support only NeoForge, remove Fabric while preserving relevant regression tests.
 - Keep only local inference: native Ollama `/api/chat` or the documented Bonsai/MTP OpenAI-compatible endpoint (`http://127.0.0.1:8899/v1`, model `swift-bonsai2-27b-katana-mtp`). Do not inspect or modify the personal host/launcher.
 - Translate all tracked project content to English; preserve code behavior and attribution. Historical Git objects are not rewritten.
