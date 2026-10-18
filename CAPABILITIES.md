@@ -205,7 +205,7 @@ All commands use `/mineagent`:
 | `help` | Show help. |
 | `quick [name] [effort]` | Create a companion using saved configuration. |
 | `spawn <name> <provider> <model> <apikey> [temperature]` | Legacy explicit creation syntax; local configuration through the UI is preferred. |
-| `remove` | Remove the primary companion. |
+| `remove` | Permanently remove all companions owned by the caller and their saved state. |
 | `respawn` | Respawn an eligible dead companion; not a permanently dead Hardcore body. |
 | `list` | List active companions. |
 | `providers` | List the supported local adapters: Ollama and Bonsai/OpenAI-compatible. |
