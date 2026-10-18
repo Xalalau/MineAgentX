@@ -36,7 +36,7 @@ All paths below are relative to this repository unless explicitly labeled extern
 | `README.md` | Overview, local connection setup, build/install entry points. |
 | `CAPABILITIES.md` | Complete registered-tool inventory, slash commands, automatic behavior, and limitations. Section 6 covers local models only. |
 | `PROGRESS.md` | Authorization, exact recovery state, completed checks, remaining integration work, and blockers. Read after interruption or compaction. |
-| `CONTRIBUTING.md`, `LICENSE` | Contribution rules and original license. |
+| `LICENSE` | Original LGPL-3.0-only license; preserve upstream attribution. |
 | `settings.gradle`, `build.gradle`, `gradle.properties` | Module graph, common build/test settings, Minecraft/NeoForge versions, identity. Inspect current values rather than guessing versions. |
 | `api/src/main/java/com/mineagent/api/` | Loader-independent configuration, model/tool/task contracts, companion game modes, payload contracts, platform API. |
 | `engine/src/main/java/com/mineagent/engine/` | Companion runtime and action execution. |
@@ -48,7 +48,6 @@ All paths below are relative to this repository unless explicitly labeled extern
 | `neoforge/src/main/resources/META-INF/` | Mod metadata and access transformer. |
 | `neoforge/src/test/java/` | Migrated upstream regressions and new local-provider/English-protocol tests. Keep applicable tests when removing unsupported implementations. |
 | `scripts/check_project.py` | Repository gates: English project text, no personal machine paths, and documented coverage of registered tools. |
-| `.github/workflows/build.yml`, `.github/workflows/release.yml` | NeoForge test/build and artifact/release automation. |
 | `neoforge/build/libs/` | Generated installable NeoForge JAR; never mistake a source/archive download for an installable mod. |
 
 ### Important runtime entry points

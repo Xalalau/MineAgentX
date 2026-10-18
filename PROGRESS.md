@@ -27,11 +27,16 @@
 - Added a personal-path publication guard and exercised it RED/GREEN. All three repository checks pass.
 - Remote inspection with `git ls-remote` now confirms sanitized privacy commit `995face814496a30b3fafab67cfc0a0614c800f7` on `master`. The assistant performed no push. Previously exposed GitHub commit pages, caches, and other clones have not been verified purged. Do not merge contaminated history back in.
 
+## Repository simplification
+
+- Removed contribution documentation and the entire GitHub configuration directory at the user's request, including issue/PR templates, release notes, and automatic build/release workflows. Updated the agent guide accordingly.
+- Local Gradle builds, regression tests, repository checks, license, and upstream attribution are retained. Removing GitHub automation does not remove the requirement to verify changes locally.
+
 ## Work in progress
 
 - User requested a maintained project guide: `agents.md` now maps source files, design intent, supported local protocols, validation, Git ownership, and parallel-agent coordination. Read it on resume and include it in future delegation context; update it in the same change when the project structure or supported behavior changes.
 
-- Documentation now includes the complete 40-tool catalog in `CAPABILITIES.md`, with the preceding checkpoint rendered in English and a local-only section 6. English README replaces the duplicated language-specific READMEs; contribution and issue documentation is aligned with the fork. The standalone security policy was removed at the user's request, along with its links, in local commit `ee235ac`.
+- Documentation now includes the complete 40-tool catalog in `CAPABILITIES.md`, with the preceding checkpoint rendered in English and a local-only section 6. English README replaces the duplicated language-specific READMEs. Contribution guidance and GitHub-specific templates/automation were subsequently removed at the user's request; local Gradle and repository-check commands remain available. The standalone security policy was removed at the user's request, along with its links, in local commit `ee235ac`.
 - `scripts/check_project.py` was exercised RED: missing capabilities and Chinese text were detected. Its tool-catalog coverage check now passes.
 - Verified Temurin JDK 21 archive checksum `ce79869e1307ed8ee1e2baa86a412b1eb5b75d10a01006d788a6f968bcfaee94`; local JAVA_HOME is `.tools/jdk-21.0.12.1+1` (ignored). Gradle 8.10.2 wrapper executed successfully with that JDK.
 - Delegated source edits have returned: local providers/connections, NeoForge build/test migration, English memory/personality sources, and English AgentLoop prompts/runtime tags. Build migration is already committed; provider/translation edits and new regression tests remain uncommitted. The coordinator owns final integration, verification, and incremental commits.
