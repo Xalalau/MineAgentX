@@ -17,13 +17,13 @@
 - Initial worktree clean. No Java or GitHub CLI on PATH.
 - The public destination initially described a different older project; its history was later reconciled without importing its source tree.
 - At initial inspection, regression tests were under `fabric/src/test/java`; applicable tests have since been migrated to NeoForge.
-- Initial Chinese content included documentation, locale data, comments, prompts, memory/personality labels and tests. The current English-content guard passes; translated executable labels still require final integrated regression validation.
+- Initial Chinese content included documentation, locale data, comments, prompts, memory/personality labels and tests. English-content checks and the final translated-label regression review now pass.
 
 ## Privacy cleanup
 
 - Removed personal machine paths/names and all references to private repositories from current project text. Removed the unpublished comparison report.
 - Rewrote all affected local history while preserving merge topology and upstream attribution. Final verification scanned every locally stored Git object, including unreachable objects; no targeted privacy matches remained. Obsolete recovery objects and cleanup tooling were removed after restoring and verifying the unfinished work.
-- Preserved all 352 working-file checksums/deletions across the rewrite; unrelated implementation work remains uncommitted and intact.
+- Preserved all 352 working-file checksums/deletions across the privacy rewrite before completing and committing the technical integration.
 - Added a personal-path publication guard and exercised it RED/GREEN. All three repository checks pass.
 - Remote inspection with `git ls-remote` now confirms sanitized privacy commit `995face814496a30b3fafab67cfc0a0614c800f7` on `master`. The assistant performed no push. Previously exposed GitHub commit pages, caches, and other clones have not been verified purged. Do not merge contaminated history back in.
 
@@ -35,20 +35,24 @@
 - Removed the inherited changelog at the user's request. Release history belongs in release notes rather than a separate tracked changelog.
 - Local Gradle builds, regression tests, repository checks, license, and upstream attribution are retained. Removing GitHub automation does not remove the requirement to verify changes locally.
 
-## Work in progress
+## Completed preparation
 
-- User requested a maintained project guide: `AGENTS.md` now maps source files, design intent, supported local protocols, validation, Git ownership, and parallel-agent coordination. Read it on resume and include it in future delegation context; update it in the same change when the project structure or supported behavior changes.
+- Maintained `AGENTS.md` maps source files, design intent, local protocols, verification, privacy, Git ownership, and parallel-agent coordination. The preserved UI design-system document is linked and updated for NeoForge and local providers; stale cross-loader source comments were corrected without altering rendering behavior.
+- `CAPABILITIES.md` opens with the preceding checkpoint in English, inventories all 40 registered tools and player commands, and restricts section 6 to local inference. README, command help, UI guidance, prompts, memory/persona text, and runtime protocol labels are aligned with the English/local-only fork. Inherited persona/emotion behavior was translated, not removed.
+- Removed Fabric integration and unsupported cloud providers while preserving applicable NeoForge regression tests. Native Ollama and Bonsai/MTP remain independently supported; model aliases and private-LAN endpoints are editable, and launcher settings are not modified.
+- Independent review found no translated producer/consumer label mismatch. Closed five concrete integration issues: malformed tool-call envelopes, invalid/duplicate explicit call IDs, provider-aware partial configuration defaults, runtime effort UI/server mismatch, and restoration of legacy local effort values.
+- Partial Ollama configuration uses its native endpoint and requires an explicit model rather than inheriting a Bonsai alias. Explicit connection overrides remain intact; unsupported adapters are not silently remapped.
+- Shared reasoning policy accepts blank/`auto`. Only restoration of recognized effort levels for the two supported local adapters migrates to `auto`, with a diagnostic and unchanged endpoint validation. Runtime Settings reports commands as queued, not prematurely applied.
+- `LLMRequest.DEFAULT_DEADLINE` supplies the shared 180-second request/provider/agent-round default. Explicit deadlines and cancellation remain supported. Valid server tool IDs are preserved exactly; omitted/null IDs receive unique internal IDs; malformed announced calls and ambiguous explicit IDs enter the retryable malformed-response path. Text/reasoning-only replies remain valid.
+- Focused fixes were exercised RED/GREEN. Standalone review checks passed 11 configuration tests and 8 reasoning-policy/wiring tests before final integration. These tests are included in the complete JUnit run below, not added to its total.
 
-- Documentation now includes the complete 40-tool catalog in `CAPABILITIES.md`, with the preceding checkpoint rendered in English and a local-only section 6. English README replaces the duplicated language-specific READMEs. Contribution guidance and GitHub-specific templates/automation were subsequently removed at the user's request; local Gradle and repository-check commands remain available. The standalone security policy was removed at the user's request, along with its links, in local commit `ee235ac`.
-- `scripts/check_project.py` was exercised RED: missing capabilities and Chinese text were detected. Its tool-catalog coverage check now passes.
-- Verified Temurin JDK 21 archive checksum `ce79869e1307ed8ee1e2baa86a412b1eb5b75d10a01006d788a6f968bcfaee94`; local JAVA_HOME is `.tools/jdk-21.0.12.1+1` (ignored). Gradle 8.10.2 wrapper executed successfully with that JDK.
-- Delegated source edits have returned: local providers/connections, NeoForge build/test migration, English memory/personality sources, and English AgentLoop prompts/runtime tags. Build migration is already committed; provider/translation edits and new regression tests remain uncommitted. The coordinator owns final integration, verification, and incremental commits.
-- User clarified that local inference means **Ollama or Bonsai**, not Bonsai exclusively. Provider and review agents were steered to support both local protocols and remove only cloud integrations.
-- The initial capability/scope documentation was committed locally using the assistant's explicit identity `Hermes Agent <hermes@localhost>`, not an inferred user identity.
-- Gradle `:neoforge:dependencies --configuration compileClasspath` exited 0. This resolves dependency metadata only; it is not a compile/test/build result. Its task-owned log is `build-dependencies.log` (ignored).
-- Earlier HTTPS push dry-run was blocked by missing authentication. The device login process `proc_3fded90ce158` was stopped after the user took over pushing. No push occurred. Do not restart authentication.
-- English/CJK guard and tool-documentation coverage both passed. Interim full Gradle tests/build (`proc_7115e3f87c1e`, log `build-verification.log`) exited 0: 23 JUnit suites, 98 tests, zero failures/errors/skips. This snapshot preceded completion of the local-provider changes; rerun before final acceptance.
-- NeoForge-only build reviewed: removed Fabric sources/build/plugin repositories, migrated relevant JUnit regressions, tightened Minecraft version range, updated fork metadata and CI, and preserved attribution. Cloud-specific test suites are removed with their unsupported provider implementations; Ollama coverage is retained/replaced by dedicated local-provider tests.
-- Latest verification for the documentation cleanup: all three `scripts/check_project.py` checks and `git diff --check` pass. No new Java test/build run was performed for these documentation-only changes.
-- The standard `neoforge/build/test-results/test/TEST-*.xml` location currently has no reports. Treat the earlier 98-test result as historical evidence, not validation of the current unfinished source tree.
-- Next: review local-provider integration and cross-layer request deadlines; run the complete NeoForge tests/build after all source edits; inspect JUnit XML and the packaged JAR; commit the remaining ready changes incrementally. Gameplay and live-model behavior remain unverified. Push is user-owned and not part of the remaining work.
+## Final verification
+
+- Verified portable Temurin JDK 21 archive checksum `ce79869e1307ed8ee1e2baa86a412b1eb5b75d10a01006d788a6f968bcfaee94`. The ignored JDK directory is `.tools/jdk-21.0.12.1+1`; Gradle wrapper version is 8.10.2.
+- After all delegated source edits, `:neoforge:clean :neoforge:test :neoforge:build` exited 0. A final test/build rerun after the remaining locale-text correction also exited 0.
+- Parsed actual JUnit XML under `neoforge/build/test-results/test/`: **30 suites, 139 tests, zero failures, errors, or skipped tests**. This supersedes all earlier partial snapshots.
+- All three `python scripts/check_project.py` checks and `git diff --check` passed. Independent protocol fixtures exercise actual HTTP requests against temporary loopback test servers, not a real loaded model.
+- Inspected `neoforge/build/libs/mineagentx-neoforge-0.4.0.jar`: CRC passes; metadata identifies MineAgentX 0.4.0; required API/engine/tool/client classes and English resources are present; original license bytes match exactly; all 493 classes use Java major version 65; unsupported provider/Fabric/test classes and targeted privacy strings are absent.
+- JAR SHA-256: `4fbdb6cfadabff6aaffac237ad6b36ae3f4a8d81865918a53dbf9e5a8824c738`.
+- Reviewed implementation, English runtime, regression tests, capability documentation, and agent-guide changes are committed locally in `e6f0938` (`feat: finish local-only inference and English runtime`). This ledger is maintained in a separate documentation commit. All assistant commits use the explicit identity `Hermes Agent <hermes@localhost>`.
+- No Minecraft installation/gameplay session or live Ollama/Bonsai inference was performed. The future construction design/preview/revision environment and additional configurable localization layers were not implemented as part of this preparation. Push remains user-owned; no authentication or push is required from the assistant.
