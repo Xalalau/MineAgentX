@@ -76,12 +76,17 @@ public class CollectItemsTool implements Tool {
         public final String itemId;
         public final int radius;
         public final int maxCount;
+        private final java.util.function.BooleanSupplier retainedAuthority;
 
         public CollectItemsTaskRecord(String toolCallId, String itemId, int radius, int maxCount) {
             super(toolCallId);
             this.itemId = itemId;
             this.radius = radius;
             this.maxCount = maxCount;
+            this.retainedAuthority = com.mineagent.api.execution.ExecutionToken.captureRetainedAuthority();
         }
+
+        /** Exact authority captured at creation, never resolved later by task ID or thread. */
+        public boolean retainedAuthorityActive() { return retainedAuthority.getAsBoolean(); }
     }
 }

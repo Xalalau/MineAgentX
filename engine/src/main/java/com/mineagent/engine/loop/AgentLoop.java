@@ -2722,7 +2722,11 @@ public class AgentLoop {
             semanticWorldModel.recordAction(tool.name(), args.toString(), execution.id(), tick);
             dispatchedActionTools.put(execution.id(), tool.name());
             mechanismExplorer.onToolDispatched(execution.id(), tool.name(), args.toString(), tick);
-        }, callback -> tool.onServerCall(execution.id(), args, companion, callback),
+        }, callback -> {
+            try (var authority = com.mineagent.api.execution.ExecutionToken.bindRetainedAuthority(execution.lease()::active)) {
+                tool.onServerCall(execution.id(), args, companion, callback);
+            }
+        },
                 raw -> publishToolOutcome(execution, raw),
                 raw -> reconcileLateToolReceipt(execution, raw),
                 failure -> toolErrorJson(tool.name(), failure),

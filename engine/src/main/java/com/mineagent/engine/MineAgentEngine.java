@@ -18,6 +18,7 @@ import com.mineagent.engine.entity.CompanionLifecycleHandler;
 import com.mineagent.engine.entity.fakeplayer.FakePlayerFactory;
 import com.mineagent.engine.entity.fakeplayer.FakePlayerGameMode;
 import com.mineagent.engine.llm.*;
+import com.mineagent.engine.i18n.CommandMessages;
 import com.mineagent.engine.loop.AgentLoop;
 import com.mineagent.engine.scheduler.PriorityAuction;
 import com.mineagent.engine.cognition.TeamBlackboard;
@@ -1906,9 +1907,9 @@ public final class MineAgentEngine {
                             var providerOpt = LLMProviderRegistry.get(providerId);
                             if (providerOpt.isEmpty()) {
                                 source.sendFailure(Component.literal(
-                                        "§c[MineAgent] Unknown provider: " + providerId));
+                                        CommandMessages.text("models.unknown_provider", providerId)));
                                 source.sendFailure(Component.literal(
-                                        "§7Use §e/mineagent providers§7 to see available providers."));
+                                        CommandMessages.text("models.providers_hint")));
                                 return 0;
                             }
                             var p = providerOpt.get();
