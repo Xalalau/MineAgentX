@@ -5,13 +5,13 @@ import com.mineagent.api.task.CompanionTask;
 import com.mineagent.api.task.TaskChain;
 import com.mineagent.api.task.TaskState;
 import com.mineagent.api.task.TaskSnapshot;
+import com.mineagent.engine.i18n.SchedulerMessages;
 import com.mineagent.engine.loop.AgentLoop;
 import com.mineagent.engine.planning.IntentAwareTask;
 import com.mineagent.engine.planning.IntentContract;
 import com.mineagent.tools.management.TaskStatusTool;
 
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 
 /**
@@ -63,8 +63,8 @@ public class PriorityAuction {
                     winner = chain;
                 }
             } catch (Exception error) {
-                System.err.println("[MineAgent] Chain " + safeChainName(chain)
-                        + " priority error: " + error.getMessage());
+                System.err.println(SchedulerMessages.text("log.chain.priority",
+                        safeChainName(chain), String.valueOf(error.getMessage())));
             }
         }
 
@@ -94,7 +94,7 @@ public class PriorityAuction {
             try {
                 currentWinner.onInterrupt(companion);
             } catch (Exception error) {
-                System.err.println("[MineAgent] Chain interrupt error: " + error.getMessage());
+                System.err.println(SchedulerMessages.text("log.chain.interrupt", String.valueOf(error.getMessage())));
             }
         }
 
@@ -103,8 +103,8 @@ public class PriorityAuction {
             try {
                 winner.tick(companion);
             } catch (Exception error) {
-                System.err.println("[MineAgent] Chain " + safeChainName(winner)
-                        + " tick error: " + error.getMessage());
+                System.err.println(SchedulerMessages.text("log.chain.tick",
+                        safeChainName(winner), String.valueOf(error.getMessage())));
                 try {
                     winner.onInterrupt(companion);
                 } catch (Exception ignored) {}
@@ -133,7 +133,7 @@ public class PriorityAuction {
                 publishProgress(false);
                 if (state != TaskState.RUNNING) finishCurrentTask(state, null);
             } catch (Exception error) {
-                System.err.println("[MineAgent] Task tick error: " + error.getMessage());
+                System.err.println(SchedulerMessages.text("log.task.tick", String.valueOf(error.getMessage())));
                 finishCurrentTask(TaskState.FAILED, error);
             }
         } else {
@@ -148,7 +148,7 @@ public class PriorityAuction {
                     idle.reset();
                 }
             } catch (Exception error) {
-                System.err.println("[MineAgent] Idle/reflex error: " + error.getMessage());
+                System.err.println(SchedulerMessages.text("log.idle", String.valueOf(error.getMessage())));
             }
         }
 
@@ -168,14 +168,13 @@ public class PriorityAuction {
         String incomingId = task.record().toolCallId();
         if (currentTask != null) {
             String activeId = currentTask.record().toolCallId();
-            String message = "Body is busy with task '" + activeId
-                    + "'; wait for completion or call task_stop before dispatching another body task";
+            String message = SchedulerMessages.text("admission.busy", String.valueOf(activeId));
             TaskSnapshot rejectedSnapshot = safeSnapshot(task);
             TaskStatusTool.updateTaskInfo(companion.companionId(), incomingId,
                     describe(task), TaskState.CANCELLED, message, null, 0L, rejectedSnapshot);
             IntentContract rejectedIntent = task instanceof IntentAwareTask aware
                     ? aware.intentContract()
-                    : IntentContract.generic(describe(task), "Executor reports success",
+                    : IntentContract.generic(describe(task), SchedulerMessages.text("intent.success"),
                     rejectedSnapshot.targetX(), rejectedSnapshot.targetY(), rejectedSnapshot.targetZ());
             loop.onTaskFinished(incomingId, describe(task), rejectedIntent,
                     TaskState.CANCELLED, rejectedSnapshot, message, gameTime());
@@ -189,7 +188,7 @@ public class PriorityAuction {
         taskPaused = false;
         currentIntent = task instanceof IntentAwareTask aware
                 ? aware.intentContract()
-                : IntentContract.generic(describe(task), "Executor reports success",
+                : IntentContract.generic(describe(task), SchedulerMessages.text("intent.success"),
                         task.snapshot().targetX(), task.snapshot().targetY(), task.snapshot().targetZ());
         lastProgressPublishTick = Long.MIN_VALUE;
         lastProgressVersion = Long.MIN_VALUE;
@@ -198,7 +197,7 @@ public class PriorityAuction {
         lastPublishedTaskState = null;
         String taskName = describe(task);
         TaskStatusTool.updateTaskInfo(companion.companionId(), task.record().toolCallId(),
-                taskName, TaskState.RUNNING, "Running", null, 0L, task.snapshot());
+                taskName, TaskState.RUNNING, SchedulerMessages.text("task.running"), null, 0L, task.snapshot());
         try {
             task.start();
             loop.onTaskAccepted(task.record().toolCallId(), taskName, currentIntent,
@@ -209,7 +208,7 @@ public class PriorityAuction {
             finishCurrentTask(TaskState.FAILED, error);
             throw error;
         }
-        return new TaskAdmission(true, incomingId, "Accepted");
+        return new TaskAdmission(true, incomingId, SchedulerMessages.text("admission.accepted"));
     }
 
     public boolean hasRunningTask() {
@@ -237,7 +236,7 @@ public class PriorityAuction {
         try {
             task.interrupt();
         } catch (Exception cleanupError) {
-            System.err.println("[MineAgent] Task cleanup error: " + cleanupError.getMessage());
+            System.err.println(SchedulerMessages.text("log.task.cleanup", String.valueOf(cleanupError.getMessage())));
         }
 
         long now = gameTime();
@@ -247,10 +246,10 @@ public class PriorityAuction {
         try {
             message = error == null
                     ? task.completionMessage(state, timedOut)
-                    : "Task failed with " + error.getClass().getSimpleName() + ": "
-                        + String.valueOf(error.getMessage());
+                    : SchedulerMessages.text("task.error", error.getClass().getSimpleName(),
+                        String.valueOf(error.getMessage()));
         } catch (Exception ignored) {
-            message = state.name().toLowerCase(Locale.ROOT);
+            message = SchedulerMessages.text("fallback." + state.name());
         }
 
         String taskId = task.record().toolCallId();
@@ -261,7 +260,7 @@ public class PriorityAuction {
         currentIntent = null;
         loop.onBodyLog("[TASK_FINISHED] task_id=" + taskId
                 + " state=" + state.name() + " message=" + message);
-        pushTaskUpdate("Idle");
+        pushTaskUpdate(SchedulerMessages.text("ui.idle"));
     }
 
     private void pauseCurrentTask(TaskChain winner) {
@@ -278,16 +277,15 @@ public class PriorityAuction {
         remainingDeadlineTicks = deadline <= 0L
                 ? 0L : Math.max(1L, deadline - taskPausedAtTick);
         TaskSnapshot snapshot = safeSnapshot(currentTask);
-        String reason = "Paused for survival chain " + safeChainName(winner);
+        String reason = SchedulerMessages.text("task.paused", safeChainName(winner));
         TaskStatusTool.updateTaskInfo(companion.companionId(),
                 currentTask.record().toolCallId(), describe(currentTask),
                 TaskState.PAUSED, reason, null,
                 Math.max(0L, taskPausedAtTick - taskStartGameTick), snapshot);
         loop.onTaskProgress(currentTask.record().toolCallId(), TaskState.PAUSED,
                 snapshot, reason, taskPausedAtTick);
-        System.out.println("[MineAgent] Body task "
-                + currentTask.record().toolCallId() + " paused for survival chain "
-                + safeChainName(winner));
+        System.out.println(SchedulerMessages.text("log.paused",
+                String.valueOf(currentTask.record().toolCallId()), safeChainName(winner)));
         pushTaskUpdate(reason);
     }
 
@@ -348,12 +346,12 @@ public class PriorityAuction {
         try {
             TaskSnapshot snapshot = task.snapshot();
             return snapshot == null
-                    ? TaskSnapshot.running("running", describe(task) + " is running")
+                    ? TaskSnapshot.running("running", SchedulerMessages.text("snapshot.running", describe(task)))
                     : snapshot;
         } catch (RuntimeException snapshotFailure) {
             return TaskSnapshot.progress("snapshot_error", describe(task),
                     0L, -1L, null, null, null,
-                    "Progress snapshot failed: " + snapshotFailure.getMessage(),
+                    SchedulerMessages.text("snapshot.error", String.valueOf(snapshotFailure.getMessage())),
                     null, 0L);
         }
     }
@@ -387,14 +385,15 @@ public class PriorityAuction {
         return calculateDynamicThreshold(Float.NEGATIVE_INFINITY);
     }
 
-    private long gameTime() {
+    /** Server clock boundary; overridable by deterministic scheduler fixtures. */
+    protected long gameTime() {
         return ((com.mineagent.engine.entity.CompanionEntity) companion)
                 .serverPlayer().level().getGameTime();
     }
 
     private static String safeChainName(TaskChain chain) {
         try {
-            return chain == null ? "unknown" : chain.name();
+            return chain == null ? "unknown" : String.valueOf(chain.name());
         } catch (Exception ignored) {
             return "unknown";
         }
@@ -406,7 +405,8 @@ public class PriorityAuction {
                 ? simple.substring(0, simple.length() - 6) : simple;
     }
 
-    private void pushTaskUpdate(String description) {
+    /** UI transport boundary; failures never affect scheduling. */
+    protected void pushTaskUpdate(String description) {
         try {
             var owner = ((com.mineagent.engine.entity.CompanionEntity) companion)
                     .serverPlayerOwner();
@@ -429,8 +429,8 @@ public class PriorityAuction {
                             .ifPresent(item -> pickup.nudgeToward(companion, item));
                 }
             } catch (Exception error) {
-                System.err.println("[MineAgent] Reflex " + reflex.id()
-                        + " tick error: " + error.getMessage());
+                System.err.println(SchedulerMessages.text("log.reflex.tick",
+                        reflex.id(), String.valueOf(error.getMessage())));
             }
         }
     }
