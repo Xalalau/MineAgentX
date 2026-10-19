@@ -106,7 +106,9 @@ Registered modded recipes can be discovered. Unknown station mechanics remain ex
 | `task_stop` | Request cancellation of a task. |
 | `wait_for` | Wait for a bounded, stable, server-observed condition: duration, item count, semantic fact, GUI slot, dimension, block state, or entity presence/absence. |
 | `coordinate_team` | Inspect team state, claim a role/objective, request support, or release a commitment. |
-| `query_extra_tools` | Expose specialized tool schemas for subsequent requests within the active owner goal. |
+| `query_extra_tools` | Return a compact capability index without exposing schemas, or select exact `categories`/`tool_names` to reveal at most four specialized tool schemas per call. Existing visibility remains controlled by the agent loop. |
+
+Discovery validates the complete selection before changing visibility. Unknown or altered IDs, invalid types/properties and selections above `limit` (1–4, default 4) are rejected without partial exposure. The result names selected tools rather than duplicating schemas or loading saved projects/memory; `total_extra` counts available specialized tools and `exposed_count` counts those selected in the call, not newly added tools. Explicit calls can accumulate specializations, so the per-call limit is not a global context cap.
 
 ## 2. Automatic body and survival behavior
 
