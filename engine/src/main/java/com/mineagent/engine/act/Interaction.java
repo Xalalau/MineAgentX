@@ -1,5 +1,6 @@
 package com.mineagent.engine.act;
 
+import com.mineagent.engine.safety.CombatSafety;
 import net.minecraft.commands.arguments.EntityAnchorArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
@@ -50,6 +51,13 @@ public final class Interaction {
             if (player == null || pos == null || hand == null) return InteractionResult.PASS;
 
             var level = player.serverLevel();
+            // Packet listeners normally enforce these before gameMode.useItemOn.
+            // Fake players call it directly and must supply the same permissions.
+            if (!player.isAlive() || !level.isInWorldBounds(pos)
+                    || !level.hasChunkAt(pos)
+                    || !level.getWorldBorder().isWithinBounds(pos)
+                    || !level.mayInteract(player, pos)
+                    || !player.canInteractWithBlock(pos, 0.0)) return InteractionResult.FAIL;
             BlockState state = level.getBlockState(pos);
 
             if (state.isAir()) return InteractionResult.PASS;
@@ -119,12 +127,10 @@ public final class Interaction {
     public static InteractionResult interactEntity(ServerPlayer player, Entity target, InteractionHand hand) {
         try {
             if (player == null || target == null || hand == null) return InteractionResult.PASS;
-            if (!target.isAlive() || target == player) return InteractionResult.FAIL;
+            if (!player.isAlive() || !target.isAlive() || target == player
+                    || target.level() != player.level()) return InteractionResult.FAIL;
 
-            // Check reach distance
-            double dist = player.distanceToSqr(target);
-            double reach = reachDistance(player);
-            if (dist > reach * reach) return InteractionResult.FAIL;
+            if (!player.canInteractWithEntity(target, 0.0)) return InteractionResult.FAIL;
             if (!player.hasLineOfSight(target)) return InteractionResult.FAIL;
 
             // Use the vanilla interact method
@@ -241,15 +247,11 @@ public final class Interaction {
         try {
             if (player == null || target == null) return false;
             if (!target.isAlive() || target == player) return false;
-            if (!target.isAttackable()) return false;
+            if (!CombatSafety.canAttack(player, target)) return false;
 
-            // Check reach distance (attack range is slightly shorter than interaction)
-            double reach = reachDistance(player);
-            double dist = player.distanceToSqr(target);
-            // Entities have a bounding box, so add some tolerance
-            double tolerance = target.getBoundingBox().getXsize() * 0.5;
-            double effectiveReach = reach + tolerance;
-            if (dist > effectiveReach * effectiveReach) return false;
+            // Melee uses the vanilla entity-interaction attribute, not block reach
+            // plus an arbitrary bounding-box allowance.
+            if (!player.canInteractWithEntity(target, 0.0)) return false;
             if (!player.hasLineOfSight(target)) return false;
 
             // A packet-driven player has already aimed before the attack

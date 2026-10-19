@@ -1,6 +1,8 @@
 package com.mineagent.engine.task;
 
 import com.mineagent.api.entity.AgentPlayer;
+import com.mineagent.api.safety.SafetyMessages;
+import com.mineagent.engine.safety.CombatSafety;
 import com.mineagent.api.task.CompanionTask;
 import com.mineagent.api.task.TaskState;
 import com.mineagent.api.task.TaskSnapshot;
@@ -58,12 +60,18 @@ public class MeleeAttackTask extends CompanionTask<MeleeAttackTool.MeleeAttackTa
         ServerLevel level = TaskContext.serverPlayer(player).serverLevel();
         target = level.getEntity(record.entityId);
         if (target == null || !target.isAlive()) {
-            failReason = "Target entity " + record.entityId + " not found or dead";
+            failReason = SafetyMessages.text("target.missing", record.entityId);
             phase = Phase.DONE;
             return;
         }
         if (target.level() != TaskContext.serverPlayer(player).level()) {
-            failReason = "Target moved to another dimension";
+            failReason = SafetyMessages.text("target.dimension");
+            phase = Phase.DONE;
+            return;
+        }
+
+        if (!CombatSafety.canAttack(TaskContext.serverPlayer(player), target)) {
+            failReason = SafetyMessages.combatDenied();
             phase = Phase.DONE;
             return;
         }
@@ -79,7 +87,7 @@ public class MeleeAttackTask extends CompanionTask<MeleeAttackTool.MeleeAttackTa
 
             @Override
             public void onNavigationFailed(String reason) {
-                failReason = "Navigation to target failed: " + reason;
+                failReason = SafetyMessages.text("nav.target", reason);
                 phase = Phase.DONE;
             }
         });
@@ -119,14 +127,14 @@ public class MeleeAttackTask extends CompanionTask<MeleeAttackTool.MeleeAttackTa
 
         // Check companion health — retreat if dying
         if (player.health() < MIN_HEALTH && player.isAlive()) {
-            failReason = "Companion health critical ("
-                    + String.format(Locale.ROOT, "%.1f", player.health()) + "), retreating";
+            failReason = SafetyMessages.text("companion.critical_health",
+                    String.format(Locale.ROOT, "%.1f", player.health()));
             phase = Phase.DONE;
         }
 
         // Check if companion died
         if (!player.isAlive()) {
-            failReason = "Companion died";
+            failReason = SafetyMessages.text("companion.dead");
             phase = Phase.DONE;
         }
 
@@ -143,6 +151,13 @@ public class MeleeAttackTask extends CompanionTask<MeleeAttackTool.MeleeAttackTa
             // Target died — success
             cancelNav();
             return TaskState.SUCCESS;
+        }
+
+        if (!CombatSafety.canAttack(TaskContext.serverPlayer(player), target)) {
+            failReason = SafetyMessages.combatDenied();
+            phase = Phase.DONE;
+            cancelNav();
+            return TaskState.FAILED;
         }
 
         switch (phase) {
@@ -252,7 +267,7 @@ public class MeleeAttackTask extends CompanionTask<MeleeAttackTool.MeleeAttackTa
         String stage = phase == null ? "initializing"
                 : phase.name().toLowerCase(java.util.Locale.ROOT);
         return TaskSnapshot.progress(stage,
-                "Melee combat with entity " + record.entityId,
+                SafetyMessages.text("melee.progress", record.entityId),
                 strikesLanded, -1,
                 pos == null ? null : pos.getX(), pos == null ? null : pos.getY(),
                 pos == null ? null : pos.getZ(),
@@ -265,27 +280,27 @@ public class MeleeAttackTask extends CompanionTask<MeleeAttackTool.MeleeAttackTa
     public IntentContract intentContract() {
         var policy = new IntentContract.TerrainPolicy(false, false, false, true,
                 0, 0, 4, IntentContract.CleanupMode.CONTEXTUAL);
-        return new IntentContract("Defeat entity " + record.entityId,
-                "The target is no longer alive", null, null, null, policy,
+        return new IntentContract(SafetyMessages.text("intent.melee", record.entityId),
+                SafetyMessages.text("intent.defeated"), null, null, null, policy,
                 java.util.List.of(new IntentContract.Constraint("combat_terrain",
                         IntentContract.ConstraintKind.HARD,
-                        "Do not alter terrain while pursuing a combat target",
+                        SafetyMessages.text("constraint.melee_terrain"),
                         "navigation")));
     }
 
     @Override
     protected String successMessage() {
-        return "Melee attack completed on entity " + record.entityId;
+        return SafetyMessages.text("melee.success", record.entityId);
     }
 
     @Override
     protected String timeoutMessage() {
-        return "Melee attack timed out on entity " + record.entityId;
+        return SafetyMessages.text("melee.timeout", record.entityId);
     }
 
     @Override
     protected String failureMessage() {
         if (failReason != null) return failReason;
-        return "Melee attack failed on entity " + record.entityId;
+        return SafetyMessages.text("melee.failure", record.entityId);
     }
 }

@@ -4,7 +4,7 @@ import com.mineagent.api.entity.AgentPlayer;
 import com.mineagent.api.task.TaskChain;
 import com.mineagent.engine.entity.CompanionEntity;
 import com.mineagent.engine.pathing.util.BlockHelper;
-import com.mineagent.engine.task.BlockDigger;
+import com.mineagent.api.safety.SafetyMessages;
 import net.minecraft.commands.arguments.EntityAnchorArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -37,7 +37,7 @@ public final class BreathChain implements TaskChain {
     private final AgentPlayer companion;
     private final CompanionBodyLog bodyLog;
 
-    private enum Phase { IDLE, SWIMMING, BREAKING_ROOF }
+    private enum Phase { IDLE, SWIMMING }
     private Phase phase = Phase.IDLE;
     private int escapeTicks;
     private int routeRefreshTicks;
@@ -45,9 +45,6 @@ public final class BreathChain implements TaskChain {
     private int stagnantTicks;
     private double bestWaypointDistance = Double.POSITIVE_INFINITY;
     private List<BlockPos> escapeRoute = List.of();
-    private int breakTicks;
-    private int breakTimeout;
-    private BlockPos breakTarget;
 
     public BreathChain(AgentPlayer companion) {
         this.companion = companion;
@@ -81,21 +78,21 @@ public final class BreathChain implements TaskChain {
                 phase = Phase.SWIMMING;
                 escapeTicks = 0;
                 routeRefreshTicks = 0;
-                bodyLog.report("low air detected; the breath controller took body control");
+                bodyLog.report(SafetyMessages.text("breath.low_air"));
             }
 
             // Reaching air, rather than an arbitrary timeout, is the only
             // successful terminal condition. The old 240-tick timeout released
             // the body while it was still drowning and reset all escape work.
             if (!sp.isEyeInFluid(FluidTags.WATER)) {
-                bodyLog.report("reached breathable air");
+                bodyLog.report(SafetyMessages.text("breath.reached_air"));
                 cleanup(sp);
                 return;
             }
 
             escapeTicks++;
             if (escapeTicks % ESCAPE_DIAGNOSTIC_INTERVAL == 0) {
-                bodyLog.report("still submerged; continuing the deterministic escape instead of yielding to the LLM");
+                bodyLog.report(SafetyMessages.text("breath.submerged"));
             }
 
             var input = ((CompanionEntity) companion).inputDriver();
@@ -105,35 +102,19 @@ public final class BreathChain implements TaskChain {
             input.setSprinting(false);
             input.setJumping(true);
 
-            if (phase == Phase.BREAKING_ROOF) {
-                tickRoofBreak(sp);
-                return;
-            }
-
             if (escapeRoute.isEmpty() || --routeRefreshTicks <= 0) {
                 refreshEscapeRoute(sp);
             }
             if (driveRoute(sp)) return;
 
-            // No open-water route was found. Clear only the first block that
-            // physically seals the current ascent column, through the same
-            // vanilla progressive break state used by normal mining tasks.
-            BlockPos roof = firstBlockingBlockAbove(sp);
-            if (roof != null) {
-                BlockDigger.BreakAssessment assessment =
-                        BlockDigger.startBreakingDetailed(sp, roof);
-                if (assessment.allowed()) {
-                    breakTarget = roof;
-                    breakTicks = 0;
-                    breakTimeout = BlockDigger.expectedBreakTicks(sp, roof);
-                    phase = Phase.BREAKING_ROOF;
-                    bodyLog.report("no open route to air; clearing the reachable roof block");
-                }
+            // Urgency does not authorize destroying a player's roof or assets.
+            // Keep searching physical water/air routes instead of mining.
+            if (escapeTicks == 1 || escapeTicks % ESCAPE_DIAGNOSTIC_INTERVAL == 0) {
+                bodyLog.report(SafetyMessages.recoveryPreservesWorld());
             }
         } catch (Exception error) {
             System.err.println("[MineAgent] Breath tick error: " + error.getMessage());
             // A transient targeting error must not release a drowning body.
-            abortRoofBreak(sp);
             phase = Phase.SWIMMING;
             escapeRoute = List.of();
             routeRefreshTicks = 0;
@@ -284,65 +265,12 @@ public final class BreathChain implements TaskChain {
                 && !sp.level().getFluidState(feet.above()).is(FluidTags.WATER);
     }
 
-    private void tickRoofBreak(ServerPlayer sp) {
-        if (breakTarget == null) {
-            phase = Phase.SWIMMING;
-            return;
-        }
-        if (BlockHelper.isPassable(sp.level().getBlockState(breakTarget))) {
-            breakTarget = null;
-            breakTicks = 0;
-            phase = Phase.SWIMMING;
-            routeRefreshTicks = 0;
-            bodyLog.report("cleared a route toward the surface");
-            return;
-        }
-
-        // If another action or a correction packet dropped the progressive
-        // destroy state, restart from fresh visibility evidence instead of
-        // waiting until death on a break that is no longer advancing.
-        if (sp.gameMode instanceof
-                com.mineagent.engine.entity.fakeplayer.FakePlayerGameMode fakeMode
-                && !fakeMode.isAutomaticallyDestroying(breakTarget)) {
-            BlockDigger.startBreakingDetailed(sp, breakTarget);
-        }
-
-        if (++breakTicks > breakTimeout + 40L) {
-            bodyLog.report("roof break stopped progressing; searching for another air route");
-            abortRoofBreak(sp);
-            phase = Phase.SWIMMING;
-            escapeRoute = List.of();
-            routeRefreshTicks = 0;
-        }
-    }
-
-    /** Return the first solid block close enough to obstruct direct ascent. */
-    private static BlockPos firstBlockingBlockAbove(ServerPlayer sp) {
-        int x = sp.blockPosition().getX();
-        int z = sp.blockPosition().getZ();
-        int fromY = (int) Math.floor(sp.getEyeY());
-        for (int y = fromY; y <= fromY + 3; y++) {
-            BlockPos pos = new BlockPos(x, y, z);
-            if (BlockHelper.isPassable(sp.level().getBlockState(pos))) continue;
-            return BlockDigger.canBreak(sp, pos) ? pos : null;
-        }
-        return null;
-    }
-
     @Override
     public void onInterrupt(AgentPlayer companion) {
         cleanup(((CompanionEntity) companion).serverPlayer());
     }
 
-    private void abortRoofBreak(ServerPlayer sp) {
-        if (breakTarget != null) BlockDigger.abortBreaking(sp, breakTarget);
-        breakTarget = null;
-        breakTicks = 0;
-        breakTimeout = 0;
-    }
-
     private void cleanup(ServerPlayer sp) {
-        abortRoofBreak(sp);
         ((CompanionEntity) companion).inputDriver().clear();
         phase = Phase.IDLE;
         escapeTicks = 0;

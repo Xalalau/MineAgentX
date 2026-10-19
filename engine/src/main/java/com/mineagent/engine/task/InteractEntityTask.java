@@ -1,10 +1,12 @@
 package com.mineagent.engine.task;
 
 import com.mineagent.api.entity.AgentPlayer;
+import com.mineagent.api.safety.SafetyMessages;
 import com.mineagent.api.task.CompanionTask;
 import com.mineagent.api.task.TaskState;
 import com.mineagent.api.task.TaskSnapshot;
 import com.mineagent.engine.act.Interaction;
+import com.mineagent.engine.safety.CombatSafety;
 import com.mineagent.engine.pathing.execute.PlayerNav;
 import com.mineagent.engine.planning.IntentAwareTask;
 import com.mineagent.engine.planning.IntentContract;
@@ -38,7 +40,12 @@ public class InteractEntityTask extends CompanionTask<InteractEntityTool.Interac
         failReason = null;
         target = TaskContext.serverPlayer(player).serverLevel().getEntity(record.entityId);
         if (target == null || !target.isAlive()) {
-            failReason = "Target entity " + record.entityId + " not found or dead";
+            failReason = SafetyMessages.text("target.missing", record.entityId);
+            phase = Phase.DONE;
+            return;
+        }
+        if ("attack".equals(record.button) && !CombatSafety.canAttack(TaskContext.serverPlayer(player), target)) {
+            failReason = SafetyMessages.combatDenied();
             phase = Phase.DONE;
             return;
         }
@@ -49,7 +56,7 @@ public class InteractEntityTask extends CompanionTask<InteractEntityTool.Interac
                 if (phase == Phase.NAVIGATE) phase = Phase.INTERACT;
             }
             @Override public void onNavigationFailed(String reason) {
-                failReason = "Navigation to entity failed: " + reason;
+                failReason = SafetyMessages.text("nav.entity", reason);
                 phase = Phase.DONE;
             }
         });
@@ -68,7 +75,23 @@ public class InteractEntityTask extends CompanionTask<InteractEntityTool.Interac
                 cancelNav();
                 return TaskState.SUCCESS;
             }
-            failReason = "Target entity " + record.entityId + " is gone";
+            failReason = SafetyMessages.text("target.gone", record.entityId);
+            cancelNav();
+            return TaskState.FAILED;
+        }
+        var sp = TaskContext.serverPlayer(player);
+        if (!sp.isAlive()) {
+            failReason = SafetyMessages.text("companion.dead");
+            cancelNav();
+            return TaskState.FAILED;
+        }
+        if (target.level() != sp.level()) {
+            failReason = SafetyMessages.text("target.dimension");
+            cancelNav();
+            return TaskState.FAILED;
+        }
+        if ("attack".equals(record.button) && !CombatSafety.canAttack(sp, target)) {
+            failReason = SafetyMessages.combatDenied();
             cancelNav();
             return TaskState.FAILED;
         }
@@ -101,7 +124,7 @@ public class InteractEntityTask extends CompanionTask<InteractEntityTool.Interac
                 : net.minecraft.world.InteractionHand.MAIN_HAND;
         if (record.itemId != null
                 && !TaskContext.selectInventoryItemForHand(player, record.itemId, hand)) {
-            failReason = "Required item '" + record.itemId + "' is not in inventory";
+            failReason = SafetyMessages.text("entity.item_missing", record.itemId);
             phase = Phase.DONE;
             return;
         }
@@ -137,7 +160,7 @@ public class InteractEntityTask extends CompanionTask<InteractEntityTool.Interac
             default -> false;
         };
         if (!accepted) {
-            failReason = "Entity rejected the requested interaction";
+            failReason = SafetyMessages.text("entity.rejected");
             phase = Phase.DONE;
             return;
         }
@@ -183,7 +206,7 @@ public class InteractEntityTask extends CompanionTask<InteractEntityTool.Interac
                 : phase.name().toLowerCase(java.util.Locale.ROOT);
         int required = Math.max(1, Math.min(record.holdTicks, MAX_INTERACT_TICKS));
         return TaskSnapshot.progress(stage,
-                "Interact with entity " + record.entityId,
+                SafetyMessages.text("entity.progress", record.entityId),
                 Math.min(interactTicks, required), required,
                 pos == null ? null : pos.getX(), pos == null ? null : pos.getY(),
                 pos == null ? null : pos.getZ(),
@@ -192,22 +215,22 @@ public class InteractEntityTask extends CompanionTask<InteractEntityTool.Interac
                 ((long) interactTicks << 3) ^ (phase == null ? 0L : phase.ordinal()));
     }
     @Override public IntentContract intentContract() {
-        return new IntentContract("Interact with entity " + record.entityId,
-                "Vanilla accepts the requested entity interaction",
+        return new IntentContract(SafetyMessages.text("entity.progress", record.entityId),
+                SafetyMessages.text("intent.interacted"),
                 null, null, null, IntentContract.TerrainPolicy.CONSERVATIVE,
                 java.util.List.of(new IntentContract.Constraint("protect_terrain",
                         IntentContract.ConstraintKind.HARD,
-                        "Do not alter terrain to reach an interaction target",
+                        SafetyMessages.text("constraint.entity_terrain"),
                         "navigation")));
     }
     @Override protected String successMessage() {
-        return "Interacted with entity " + record.entityId + " (button=" + record.button + ")";
+        return SafetyMessages.text("entity.success", record.entityId, record.button);
     }
     @Override protected String timeoutMessage() {
-        return "Entity interaction timed out on entity " + record.entityId;
+        return SafetyMessages.text("entity.timeout", record.entityId);
     }
     @Override protected String failureMessage() {
         return failReason != null ? failReason
-                : "Entity interaction failed on entity " + record.entityId;
+                : SafetyMessages.text("entity.failure", record.entityId);
     }
 }

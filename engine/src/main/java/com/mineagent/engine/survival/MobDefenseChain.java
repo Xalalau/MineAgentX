@@ -6,6 +6,9 @@ import com.mineagent.api.task.TaskChain;
 import com.mineagent.engine.entity.CompanionEntity;
 import com.mineagent.engine.MineAgentEngine;
 import com.mineagent.engine.act.Interaction;
+import com.mineagent.api.safety.CombatPolicy;
+import com.mineagent.api.safety.SafetyMessages;
+import com.mineagent.engine.safety.CombatSafety;
 import com.mineagent.engine.task.TaskContext;
 
 import net.minecraft.server.level.ServerPlayer;
@@ -109,14 +112,14 @@ public final class MobDefenseChain implements TaskChain {
                     if (isCreeper(threat) && threat.distanceTo(sp) < CREEPER_FLEE_DISTANCE) {
                         mode = Mode.FLEEING;
                         target = threat;
-                        bodyLog.report("spotted a creeper, running away!");
+                        bodyLog.report(SafetyMessages.text("defense.creeper"));
                         break;
                     }
                 }
                 // Low health while fighting? Switch to flee
                 if (mode == Mode.FIGHTING && companion.health() <= config.healthFlee()) {
                     mode = Mode.FLEEING;
-                    bodyLog.report("health is low, retreating from combat");
+                    bodyLog.report(SafetyMessages.text("defense.low_health"));
                 }
             }
 
@@ -130,12 +133,12 @@ public final class MobDefenseChain implements TaskChain {
                             mode = Mode.FIGHTING;
                             target = threats.get(0);
                             fightTicks = 0;
-                            bodyLog.report("fighting back against " + entityName(target));
+                            bodyLog.report(SafetyMessages.text("defense.fighting", entityName(target)));
                         } else {
                             mode = Mode.FLEEING;
                             target = threats.get(0);
                             fleeTicks = 0;
-                            bodyLog.report("fleeing from " + entityName(target));
+                            bodyLog.report(SafetyMessages.text("defense.fleeing", entityName(target)));
                         }
                     }
                 }
@@ -181,10 +184,18 @@ public final class MobDefenseChain implements TaskChain {
                 target = threats.get(0);
                 fightTicks = 0;
             } else {
-                bodyLog.report("no more threats nearby");
+                bodyLog.report(SafetyMessages.text("defense.no_threats"));
                 reset();
                 return;
             }
+        }
+
+        // Revalidate even after selection: server policy may change mid-fight.
+        if (!CombatSafety.canAttack(sp, target)) {
+            mode = Mode.FLEEING;
+            fightTicks = 0;
+            input.clear();
+            return;
         }
 
         // Look at target
@@ -215,7 +226,7 @@ public final class MobDefenseChain implements TaskChain {
 
         // Safety: max 400 ticks (20 seconds) of fighting
         if (fightTicks > 400) {
-            bodyLog.report("fight has gone on too long, disengaging");
+            bodyLog.report(SafetyMessages.text("defense.too_long"));
             reset();
         }
     }
@@ -249,14 +260,14 @@ public final class MobDefenseChain implements TaskChain {
 
         // Check if we're safe now
         if (fleeFrom.distanceTo(sp) > SCAN_RADIUS || !fleeFrom.isAlive()) {
-            bodyLog.report("escaped from " + entityName(fleeFrom));
+            bodyLog.report(SafetyMessages.text("defense.escaped", entityName(fleeFrom)));
             reset();
             return;
         }
 
         // Safety: max 200 ticks (10 seconds) of fleeing
         if (fleeTicks > 200) {
-            bodyLog.report("couldn't escape, stopping flee");
+            bodyLog.report(SafetyMessages.text("defense.no_escape"));
             reset();
         }
     }
@@ -385,7 +396,7 @@ public final class MobDefenseChain implements TaskChain {
     }
 
     private static String entityName(LivingEntity entity) {
-        if (entity == null) return "unknown";
+        if (entity == null) return SafetyMessages.text("unknown");
         return entity.getType().getDescriptionId().replace("entity.", "");
     }
 }

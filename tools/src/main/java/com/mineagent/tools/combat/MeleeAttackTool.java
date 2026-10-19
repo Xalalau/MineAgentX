@@ -5,6 +5,8 @@ import com.mineagent.api.agent.tool.Schema;
 import com.mineagent.api.agent.tool.Tool;
 import com.mineagent.api.agent.tool.ToolArgs;
 import com.mineagent.api.entity.AgentPlayer;
+import com.mineagent.api.safety.SafetyMessages;
+import com.mineagent.engine.safety.CombatSafety;
 import com.mineagent.api.task.TaskDispatch;
 
 import java.util.Map;
@@ -27,20 +29,14 @@ public class MeleeAttackTool implements Tool {
 
     @Override
     public String description() {
-        return """
-            Attack an entity with a melee weapon. The companion will navigate
-            within melee range and strike the target repeatedly until it dies
-            or the task is cancelled. Uses the currently equipped weapon.
-            
-            Returns a task_id for tracking.
-            """;
+        return SafetyMessages.text("melee.description");
     }
 
     @Override
     public Map<String, Object> parameterSchema() {
         return Schema.object()
-                .integer("entity_id", "The entity ID of the target to attack", 0, Integer.MAX_VALUE)
-                .optionalInteger("hold_ticks", "Extra aim ticks before each swing (0-40, default 0)", 0, 40)
+                .integer("entity_id", SafetyMessages.text("param.entity.attack"), 0, Integer.MAX_VALUE)
+                .optionalInteger("hold_ticks", SafetyMessages.text("param.hold"), 0, 40)
                 .build();
     }
 
@@ -48,24 +44,29 @@ public class MeleeAttackTool implements Tool {
     public void onServerCall(String toolCallId, JsonObject args, AgentPlayer player,
                               Consumer<String> reply) {
         if (!ToolArgs.has(args, "entity_id")) {
-            reply.accept("{\"error\":\"Missing required parameter 'entity_id'.\"}");
+            reply.accept(ToolArgs.errorJson(SafetyMessages.text("error.missing", "entity_id")));
             return;
         }
         Integer entityId = ToolArgs.getIntOrNull(args, "entity_id");
         if (entityId == null || entityId < 0) {
-            reply.accept(ToolArgs.errorJson("'entity_id' must be a non-negative integer."));
+            reply.accept(ToolArgs.errorJson(SafetyMessages.text("error.entity_id")));
             return;
         }
         Integer holdTicks = ToolArgs.has(args, "hold_ticks")
                 ? ToolArgs.getIntOrNull(args, "hold_ticks") : 0;
         if (holdTicks == null || holdTicks < 0 || holdTicks > 40) {
-            reply.accept(ToolArgs.errorJson("'hold_ticks' must be an integer from 0 to 40."));
+            reply.accept(ToolArgs.errorJson(SafetyMessages.text("error.hold")));
             return;
         }
         var sp = ((com.mineagent.engine.entity.CompanionEntity) player).serverPlayer();
         var target = sp.serverLevel().getEntity(entityId);
         if (target == null || !target.isAlive() || target == sp || !target.isAttackable()) {
-            reply.accept(ToolArgs.errorJson("Entity " + entityId + " was not found or cannot be attacked."));
+            reply.accept(ToolArgs.errorJson(SafetyMessages.text("error.attack_target", entityId)));
+            return;
+        }
+
+        if (!CombatSafety.canAttack(sp, target)) {
+            reply.accept(ToolArgs.errorJson(SafetyMessages.combatDenied()));
             return;
         }
 

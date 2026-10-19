@@ -1,6 +1,8 @@
 package com.mineagent.engine.task;
 
 import com.mineagent.api.entity.AgentPlayer;
+import com.mineagent.api.safety.SafetyMessages;
+import com.mineagent.engine.safety.CombatSafety;
 import com.mineagent.api.task.CompanionTask;
 import com.mineagent.api.task.TaskState;
 import com.mineagent.api.task.TaskSnapshot;
@@ -68,19 +70,24 @@ public class RangedAttackTask
         ServerLevel level = sp.serverLevel();
         target = level.getEntity(record.entityId);
         if (target == null || !target.isAlive() || target == sp) {
-            fail("Target entity " + record.entityId + " not found or invalid");
+            fail(SafetyMessages.text("target.invalid", record.entityId));
+            return;
+        }
+
+        if (!CombatSafety.canAttack(sp, target)) {
+            fail(SafetyMessages.combatDenied());
             return;
         }
 
         weaponKind = weaponKind(sp.getMainHandItem());
         if (weaponKind == WeaponKind.INVALID) {
-            fail("Main hand does not contain a supported ranged weapon");
+            fail(SafetyMessages.text("weapon.invalid"));
             return;
         }
         effectiveRange = Ballistics.effectiveRange(
                 player.mainHandItemId(), record.chargeTicks);
         if (!hasAmmo(sp, sp.getMainHandItem(), weaponKind)) {
-            fail("No compatible ammunition for the held ranged weapon");
+            fail(SafetyMessages.text("ammo.missing"));
             return;
         }
 
@@ -102,7 +109,7 @@ public class RangedAttackTask
 
             @Override
             public void onNavigationFailed(String reason) {
-                fail("Navigation to firing range failed: " + reason);
+                fail(SafetyMessages.text("nav.range", reason));
             }
         });
         navigateToRange();
@@ -134,8 +141,8 @@ public class RangedAttackTask
             cleanup();
             return TaskState.FAILED;
         }
-        if (!player.isAlive()) fail("Companion died");
-        else if (player.health() < MIN_HEALTH) fail("Companion health critical, retreating");
+        if (!player.isAlive()) fail(SafetyMessages.text("companion.dead"));
+        else if (player.health() < MIN_HEALTH) fail(SafetyMessages.text("companion.critical"));
 
         // Do not turn an invalid request (missing target, weapon or ammo) into
         // a false success merely because the target lookup is empty on the
@@ -151,7 +158,13 @@ public class RangedAttackTask
             return TaskState.SUCCESS;
         }
         if (target.level() != sp.level()) {
-            fail("Target moved to another dimension");
+            fail(SafetyMessages.text("target.dimension"));
+        }
+
+        if (!CombatSafety.canAttack(sp, target)) {
+            fail(SafetyMessages.combatDenied());
+            cleanup();
+            return TaskState.FAILED;
         }
 
         switch (phase) {
@@ -198,11 +211,11 @@ public class RangedAttackTask
         ItemStack held = sp.getMainHandItem();
         WeaponKind currentKind = weaponKind(held);
         if (currentKind != weaponKind) {
-            fail("Held ranged weapon changed during the task");
+            fail(SafetyMessages.text("weapon.changed"));
             return;
         }
         if (!hasAmmo(sp, held, weaponKind)) {
-            fail("Out of compatible ammunition");
+            fail(SafetyMessages.text("ammo.empty"));
             return;
         }
         if (!hasClearShot()) {
@@ -214,7 +227,7 @@ public class RangedAttackTask
         if (weaponKind == WeaponKind.CROSSBOW && CrossbowItem.isCharged(held)) {
             if (!Interaction.useItem(sp, InteractionHand.MAIN_HAND)
                     || CrossbowItem.isCharged(sp.getMainHandItem())) {
-                fail("Charged crossbow did not fire");
+                fail(SafetyMessages.text("crossbow.no_fire"));
                 return;
             }
             finishShot();
@@ -225,12 +238,12 @@ public class RangedAttackTask
             int before = held.getCount();
             var beforeItem = held.getItem();
             if (!Interaction.useItem(sp, InteractionHand.MAIN_HAND)) {
-                fail("Held projectile refused use");
+                fail(SafetyMessages.text("projectile.refused"));
                 return;
             }
             ItemStack after = sp.getMainHandItem();
             if (after.is(beforeItem) && after.getCount() >= before) {
-                fail("Projectile use consumed no item");
+                fail(SafetyMessages.text("projectile.no_consumption"));
                 return;
             }
             finishShot();
@@ -240,7 +253,7 @@ public class RangedAttackTask
         if (!Interaction.useItem(sp, InteractionHand.MAIN_HAND)
                 || !sp.isUsingItem()
                 || sp.getUsedItemHand() != InteractionHand.MAIN_HAND) {
-            fail("Ranged weapon did not enter its charging state");
+            fail(SafetyMessages.text("weapon.no_charge"));
             return;
         }
 
@@ -256,7 +269,7 @@ public class RangedAttackTask
     private void tickCharge() {
         ServerPlayer sp = TaskContext.serverPlayer(player);
         if (!sp.isUsingItem() || weaponKind(sp.getUseItem()) != weaponKind) {
-            fail("Ranged weapon charge was interrupted");
+            fail(SafetyMessages.text("weapon.interrupted"));
             return;
         }
         if (!hasClearShot()) {
@@ -269,11 +282,16 @@ public class RangedAttackTask
         aimAtTarget();
         if (sp.getTicksUsingItem() < requiredChargeTicks) return;
 
+        if (!CombatSafety.canFireAt(sp, target)) {
+            sp.stopUsingItem();
+            fail(SafetyMessages.combatDenied());
+            return;
+        }
         sp.releaseUsingItem();
         TaskContext.syncInventory(sp);
         if (weaponKind == WeaponKind.CROSSBOW) {
             if (!CrossbowItem.isCharged(sp.getMainHandItem())) {
-                fail("Crossbow failed to load after charging");
+                fail(SafetyMessages.text("crossbow.no_load"));
                 return;
             }
             phase = Phase.SHOOT;
@@ -287,7 +305,7 @@ public class RangedAttackTask
         TaskContext.serverPlayer(player).swing(InteractionHand.MAIN_HAND);
         TaskContext.syncInventory(TaskContext.serverPlayer(player));
         if (shotsFired >= MAX_SHOTS) {
-            fail("Max shots (" + MAX_SHOTS + ") reached without killing target");
+            fail(SafetyMessages.text("shots.max", MAX_SHOTS));
             return;
         }
         cooldownTicks = SHOT_COOLDOWN;
@@ -322,7 +340,7 @@ public class RangedAttackTask
 
     private boolean hasClearShot() {
         ServerPlayer sp = TaskContext.serverPlayer(player);
-        return target != null && target.isAlive() && sp.hasLineOfSight(target);
+        return CombatSafety.canFireAt(sp, target);
     }
 
     private void aimAtTarget() {
@@ -397,7 +415,7 @@ public class RangedAttackTask
         String stage = phase == null ? "initializing"
                 : phase.name().toLowerCase(java.util.Locale.ROOT);
         return TaskSnapshot.progress(stage,
-                "Ranged combat with entity " + record.entityId,
+                SafetyMessages.text("ranged.progress", record.entityId),
                 shotsFired, MAX_SHOTS,
                 pos == null ? null : pos.getX(), pos == null ? null : pos.getY(),
                 pos == null ? null : pos.getZ(),
@@ -410,34 +428,32 @@ public class RangedAttackTask
     public IntentContract intentContract() {
         var policy = new IntentContract.TerrainPolicy(false, false, false, false,
                 0, 0, 4, IntentContract.CleanupMode.CONTEXTUAL);
-        return new IntentContract("Defeat entity " + record.entityId + " at range",
-                "The target is no longer alive", null, null, null, policy,
+        return new IntentContract(SafetyMessages.text("intent.ranged", record.entityId),
+                SafetyMessages.text("intent.defeated"), null, null, null, policy,
                 java.util.List.of(
                 new IntentContract.Constraint("clear_shot",
                         IntentContract.ConstraintKind.HARD,
-                        "Never release a projectile without current line of sight",
+                        SafetyMessages.text("constraint.clear_shot"),
                         "combat"),
                 new IntentContract.Constraint("combat_terrain",
                         IntentContract.ConstraintKind.HARD,
-                        "Do not alter terrain to obtain a firing position",
+                        SafetyMessages.text("constraint.ranged_terrain"),
                         "navigation")));
     }
 
     @Override
     protected String successMessage() {
-        return "Ranged attack completed on entity " + record.entityId
-                + " (shots: " + shotsFired + ")";
+        return SafetyMessages.text("ranged.success", record.entityId, shotsFired);
     }
 
     @Override
     protected String timeoutMessage() {
-        return "Ranged attack timed out on entity " + record.entityId
-                + " (shots: " + shotsFired + ")";
+        return SafetyMessages.text("ranged.timeout", record.entityId, shotsFired);
     }
 
     @Override
     protected String failureMessage() {
         return failReason != null ? failReason
-                : "Ranged attack failed on entity " + record.entityId;
+                : SafetyMessages.text("ranged.failure", record.entityId);
     }
 }

@@ -1,6 +1,8 @@
 package com.mineagent.engine.planning;
 
 import com.mineagent.engine.act.Placement;
+import com.mineagent.api.safety.WorldMutationPolicy;
+import com.mineagent.api.safety.WorldMutationPolicy.BreakCause;
 import com.mineagent.engine.pathing.util.BlockHelper;
 import com.mineagent.engine.task.BlockDigger;
 import net.minecraft.core.BlockPos;
@@ -75,6 +77,13 @@ public final class TemporaryBlockLedger {
      * caller must not run idle wandering or pickup steering on the same tick.
      */
     public synchronized boolean tickIdle() {
+        final boolean[] handled = {false};
+        WorldMutationPolicy.runWithBreakCause(BreakCause.TEMPORARY_CLEANUP,
+                () -> handled[0] = tickIdleWithinPolicy());
+        return handled[0];
+    }
+
+    private boolean tickIdleWithinPolicy() {
         pruneStaleEntries();
         if (activeBreakTarget != null) return tickActiveBreak();
         if (entries.isEmpty()) return false;

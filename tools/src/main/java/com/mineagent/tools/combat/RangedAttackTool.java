@@ -5,6 +5,8 @@ import com.mineagent.api.agent.tool.Schema;
 import com.mineagent.api.agent.tool.Tool;
 import com.mineagent.api.agent.tool.ToolArgs;
 import com.mineagent.api.entity.AgentPlayer;
+import com.mineagent.api.safety.SafetyMessages;
+import com.mineagent.engine.safety.CombatSafety;
 import com.mineagent.api.task.TaskDispatch;
 
 import java.util.Map;
@@ -27,20 +29,14 @@ public class RangedAttackTool implements Tool {
 
     @Override
     public String description() {
-        return """
-            Shoot a projectile at a target entity. The companion will aim at
-            the target and fire the currently held ranged weapon (bow, crossbow,
-            trident, etc.). For bows, specify charge_ticks to control draw time.
-            
-            Returns a task_id for tracking.
-            """;
+        return SafetyMessages.text("ranged.description");
     }
 
     @Override
     public Map<String, Object> parameterSchema() {
         return Schema.object()
-                .integer("entity_id", "The entity ID of the target to shoot at", 0, Integer.MAX_VALUE)
-                .optionalInteger("charge_ticks", "Bow/trident charge time in ticks (3-60, default 20). Longer bow charge increases damage.", 3, 60)
+                .integer("entity_id", SafetyMessages.text("param.entity.shoot"), 0, Integer.MAX_VALUE)
+                .optionalInteger("charge_ticks", SafetyMessages.text("param.charge"), 3, 60)
                 .build();
     }
 
@@ -48,12 +44,12 @@ public class RangedAttackTool implements Tool {
     public void onServerCall(String toolCallId, JsonObject args, AgentPlayer player,
                               Consumer<String> reply) {
         if (!ToolArgs.has(args, "entity_id")) {
-            reply.accept("{\"error\":\"Missing required parameter 'entity_id'.\"}");
+            reply.accept(ToolArgs.errorJson(SafetyMessages.text("error.missing", "entity_id")));
             return;
         }
         Integer entityId = ToolArgs.getIntOrNull(args, "entity_id");
         if (entityId == null || entityId < 0) {
-            reply.accept(ToolArgs.errorJson("'entity_id' must be a non-negative integer."));
+            reply.accept(ToolArgs.errorJson(SafetyMessages.text("error.entity_id")));
             return;
         }
         Integer chargeTicks = ToolArgs.has(args, "charge_ticks")
@@ -61,13 +57,18 @@ public class RangedAttackTool implements Tool {
         // A bow released before three ticks has zero vanilla shooting power,
         // so accepting 1-2 advertised a shot that could never be produced.
         if (chargeTicks == null || chargeTicks < 3 || chargeTicks > 60) {
-            reply.accept(ToolArgs.errorJson("'charge_ticks' must be an integer from 3 to 60."));
+            reply.accept(ToolArgs.errorJson(SafetyMessages.text("error.charge")));
             return;
         }
         var sp = ((com.mineagent.engine.entity.CompanionEntity) player).serverPlayer();
         var target = sp.serverLevel().getEntity(entityId);
         if (target == null || !target.isAlive() || target == sp || !target.isAttackable()) {
-            reply.accept(ToolArgs.errorJson("Entity " + entityId + " was not found or cannot be attacked."));
+            reply.accept(ToolArgs.errorJson(SafetyMessages.text("error.attack_target", entityId)));
+            return;
+        }
+
+        if (!CombatSafety.canAttack(sp, target)) {
+            reply.accept(ToolArgs.errorJson(SafetyMessages.combatDenied()));
             return;
         }
 

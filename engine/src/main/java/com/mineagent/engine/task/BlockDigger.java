@@ -1,6 +1,9 @@
 package com.mineagent.engine.task;
 
 import com.mineagent.engine.act.BlockTargeting;
+import com.mineagent.api.safety.SafetyMessages;
+import com.mineagent.api.safety.WorldMutationPolicy;
+import com.mineagent.api.safety.WorldMutationPolicy.BreakCause;
 import net.minecraft.commands.arguments.EntityAnchorArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -20,6 +23,7 @@ public final class BlockDigger {
     public enum BreakStatus {
         READY,
         INVALID_ARGUMENT,
+        AUTONOMOUS_MUTATION_DENIED,
         OUT_OF_WORLD,
         OUTSIDE_WORLD_BORDER,
         AIR,
@@ -73,7 +77,12 @@ public final class BlockDigger {
      * instead of asking the model to guess whether a region is protected.
      */
     public static BreakAssessment startBreakingDetailed(ServerPlayer player, BlockPos pos) {
-        BreakAssessment assessment = assessBreak(player, pos);
+        return startBreakingDetailed(player, pos, WorldMutationPolicy.currentBreakCause());
+    }
+
+    /** Explicit authority must be supplied by automatic controllers, never inferred from urgency. */
+    public static BreakAssessment startBreakingDetailed(ServerPlayer player, BlockPos pos, BreakCause cause) {
+        BreakAssessment assessment = assessBreak(player, pos, cause);
         if (!assessment.allowed()) return assessment;
         BlockState state = player.level().getBlockState(pos);
         prepareBestTool(player, state);
@@ -89,7 +98,7 @@ public final class BlockDigger {
                 com.mineagent.engine.entity.fakeplayer.FakePlayerGameMode fakeMode
                 && !fakeMode.isAutomaticallyDestroying(pos)) {
             return new BreakAssessment(BreakStatus.VANILLA_START_REJECTED,
-                    "server game mode did not accept START_DESTROY_BLOCK", hit);
+                    SafetyMessages.text("break.vanilla_rejected"), hit);
         }
         return assessment;
     }
@@ -190,8 +199,16 @@ public final class BlockDigger {
      * human client can aim rather than requiring the block centre to be clear.
      */
     public static BreakAssessment assessBreak(ServerPlayer player, BlockPos pos) {
+        return assessBreak(player, pos, WorldMutationPolicy.currentBreakCause());
+    }
+
+    public static BreakAssessment assessBreak(ServerPlayer player, BlockPos pos, BreakCause cause) {
+        if (!WorldMutationPolicy.allowsBreaking(cause)) {
+            return rejected(BreakStatus.AUTONOMOUS_MUTATION_DENIED,
+                    SafetyMessages.recoveryPreservesWorld());
+        }
         if (player == null || pos == null) {
-            return rejected(BreakStatus.INVALID_ARGUMENT, "player or target is null");
+            return rejected(BreakStatus.INVALID_ARGUMENT, SafetyMessages.text("break.invalid"));
         }
         var level = player.serverLevel();
         if (!level.isInWorldBounds(pos)) {
@@ -204,7 +221,7 @@ public final class BlockDigger {
         }
         BlockState state = level.getBlockState(pos);
         if (state.isAir()) {
-            return rejected(BreakStatus.AIR, "target already contains air");
+            return rejected(BreakStatus.AIR, SafetyMessages.text("break.air"));
         }
         float hardness = state.getDestroySpeed(level, pos);
         if (!Float.isFinite(hardness) || hardness < 0.0f) {
@@ -216,29 +233,28 @@ public final class BlockDigger {
         double dy = pos.getY() + 0.5 - player.getEyeY();
         double dz = pos.getZ() + 0.5 - player.getZ();
         double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
-        // Match vanilla's one-block packet tolerance. The visible hit itself
-        // is still constrained to the configured reach by BlockTargeting.
-        if (!player.canInteractWithBlock(pos, 1.0) && distance > reach) {
+        // The one-block packet allowance is network latency tolerance, not
+        // additional physical reach for a server-local autonomous player.
+        if (!player.canInteractWithBlock(pos, 0.0)) {
             return rejected(BreakStatus.OUT_OF_REACH,
                     String.format(Locale.ROOT, "distance=%.2f reach=%.2f", distance, reach));
         }
         if (!level.mayInteract(player, pos)) {
             return rejected(BreakStatus.WORLD_INTERACTION_DENIED,
-                    "server mayInteract denied target=" + pos.toShortString());
+                    SafetyMessages.text("break.may_interact", pos.toShortString()));
         }
         if (player.blockActionRestricted(level, pos,
                 player.gameMode.getGameModeForPlayer())) {
             return rejected(BreakStatus.GAME_MODE_RESTRICTED,
-                    "game mode restricted target=" + pos.toShortString());
+                    SafetyMessages.text("break.mode", pos.toShortString()));
         }
 
         var hit = BlockTargeting.findVisibleHit(player, pos, reach);
         if (hit.isEmpty()) {
             BlockPos blocker = BlockTargeting.centreRayBlocker(player, pos);
             String detail = blocker == null
-                    ? "no target outline face is visible within reach"
-                    : "no target outline face is visible; centre_ray_first_hit="
-                    + blocker.toShortString();
+                    ? SafetyMessages.text("break.visible_face")
+                    : SafetyMessages.text("break.blocker", blocker.toShortString());
             return rejected(BreakStatus.OCCLUDED, detail);
         }
         return new BreakAssessment(BreakStatus.READY,

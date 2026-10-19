@@ -1,6 +1,8 @@
 package com.mineagent.engine.pathing.execute;
 
 import com.mineagent.api.entity.AgentPlayer;
+import com.mineagent.api.safety.WorldMutationPolicy;
+import com.mineagent.api.safety.WorldMutationPolicy.BreakCause;
 import com.mineagent.engine.pathing.astar.*;
 import com.mineagent.engine.pathing.cache.PathCaches;
 import com.mineagent.engine.pathing.goals.Goal;
@@ -162,12 +164,16 @@ public class PathingCore {
      * Tick the state machine. Called every server tick.
      */
     public void tick() {
-        switch (state) {
-            case IDLE -> {}
-            case SEARCH -> tickSearch();
-            case EXECUTE -> tickExecute();
-            case SEGMENT -> tickSegment();
-        }
+        // Movement.ensureClearance has legacy break calls. A newly placed
+        // obstacle must not turn a no-dig route into implicit mining authority.
+        WorldMutationPolicy.runWithBreakCause(BreakCause.NAVIGATION, () -> {
+            switch (state) {
+                case IDLE -> {}
+                case SEARCH -> tickSearch();
+                case EXECUTE -> tickExecute();
+                case SEGMENT -> tickSegment();
+            }
+        });
     }
 
     private void tickSearch() {
@@ -182,7 +188,8 @@ public class PathingCore {
             ChunkLoadedTest chunkTest = caches.loadedChunks()::isChunkLoaded;
             CalculationContext ctx = new CalculationContext(
                     caches.level(), caches.worldView(), chunkTest,
-                    pathConfig.allowDigThrough()
+                    WorldMutationPolicy.allowsBreaking(BreakCause.NAVIGATION)
+                            && pathConfig.allowDigThrough()
                             && terrainPolicy.allowBreakingObstacles()
                             && !digDisabledForCurrentGoal,
                     pathConfig.allowBridge() && terrainPolicy.allowBridge()
@@ -291,6 +298,14 @@ public class PathingCore {
             return;
         }
 
+        // The world can change after A* finishes. Never let a movement's
+        // generic obstacle-clear fallback mine a newly placed player block.
+        if (lastResult != null && requiredObstacleBreaks(lastResult.path()) > 0) {
+            executor.stop();
+            lastFailureDetail = "PATH_OBSTACLE_REQUIRES_EXPLICIT_MINING";
+            state = State.IDLE;
+            return;
+        }
         executor.tick();
 
         if (executor.isFinished()) {

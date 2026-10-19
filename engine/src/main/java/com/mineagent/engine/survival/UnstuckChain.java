@@ -4,7 +4,7 @@ import com.mineagent.api.entity.AgentPlayer;
 import com.mineagent.api.entity.InputDriver;
 import com.mineagent.api.task.TaskChain;
 import com.mineagent.engine.entity.CompanionEntity;
-import com.mineagent.engine.task.BlockDigger;
+import com.mineagent.api.safety.SafetyMessages;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -19,9 +19,9 @@ import net.minecraft.world.phys.Vec3;
  * real human player would.
  *
  * <p><b>Design philosophy:</b> A real player never teleports out of being
- * stuck. They look around, break the block in their way, place a block to
- * step up, or back up and try a different direction. This chain replicates
- * that behavior. There is NO teleport — not upward, not to the owner.
+ * stuck. They look around, step aside, or back up and try a different direction.
+ * Automatic recovery preserves existing blocks; destructive work requires an
+ * explicit task. There is NO teleport — not upward, not to the owner.
  * If all human-like strategies fail, the chain simply gives up and lets the
  * LLM's higher-level reasoning take over (it will see "I'm stuck" in the
  * body log and can decide to place blocks, dig, or pick a different goal).
@@ -30,8 +30,6 @@ import net.minecraft.world.phys.Vec3;
  * <ol>
  *   <li><b>WIGGLE</b> — jump + strafe left/right, try to unstick from
  *       minor obstacles (cobweb, fence corner, etc.). 30 ticks.</li>
- *   <li><b>BREAK</b> — break blocks blocking the head/feet/front, then
- *       walk through. 40 ticks.</li>
  *   <li><b>BACK_AWAY</b> — back up 3 blocks and try a different direction.
  *       20 ticks.</li>
  *   <li><b>GIVE_UP</b> — stop trying, report to LLM, let it decide.</li>
@@ -78,7 +76,7 @@ public final class UnstuckChain implements TaskChain {
      */
     private final UnstuckDetector stuckDetector;
 
-    private enum Phase { IDLE, WIGGLE, BREAK, BACK_AWAY, GIVE_UP }
+    private enum Phase { IDLE, WIGGLE, BACK_AWAY, GIVE_UP }
     private Phase phase = Phase.IDLE;
     private int stuckTicks = 0;
     private int actionTicks = 0;
@@ -86,9 +84,6 @@ public final class UnstuckChain implements TaskChain {
     /** The direction we were trying to move when stuck (for BACK_AWAY). */
     private Direction stuckFacing = Direction.NORTH;
     private float escapeYaw;
-    private BlockPos activeBreakTarget;
-    private int activeBreakTimeout;
-    private int activeBreakTicks;
 
     /**
      * Last recorded movement input state — used to feed the stuck detector.
@@ -134,7 +129,7 @@ public final class UnstuckChain implements TaskChain {
             // before the cooldown check below, otherwise an in-progress
             // escape sequence (WIGGLE/BREAK/BACK_AWAY/GIVE_UP) would be
             // cut off the moment the post-trigger cooldown starts.
-            if (phase == Phase.WIGGLE || phase == Phase.BREAK
+            if (phase == Phase.WIGGLE
                     || phase == Phase.BACK_AWAY || phase == Phase.GIVE_UP) {
                 return PRIORITY;
             }
@@ -207,10 +202,9 @@ public final class UnstuckChain implements TaskChain {
 
             switch (phase) {
                 case IDLE -> {
-                    // Record which direction we're facing when stuck —
-                    // we'll try breaking that way first, then back away.
+                    // Record the obstructed direction so recovery can back away.
                     stuckFacing = sp.getDirection();
-                    bodyLog.report("stuck in place, trying to wiggle free");
+                    bodyLog.report(SafetyMessages.text("unstuck.wiggle"));
                     phase = Phase.WIGGLE;
                     actionTicks = 0;
                 }
@@ -244,83 +238,18 @@ public final class UnstuckChain implements TaskChain {
                         double dz = pos.z - lastPosition.z;
                         double horizontalDist = Math.sqrt(dx * dx + dz * dz);
                         if (horizontalDist > 1.0) {
-                            bodyLog.report("wiggle free");
+                            bodyLog.report(SafetyMessages.text("unstuck.free"));
                             reset();
                             return;
                         }
                     }
 
-                    // After 30 ticks of wiggling, try breaking blocks
+                    // Recovery has no authority to dismantle existing terrain.
                     if (actionTicks > 30) {
-                        phase = Phase.BREAK;
-                        actionTicks = 0;
-                        bodyLog.report("wiggle didn't work, breaking blocks in the way");
-                    }
-                }
-                case BREAK -> {
-                    actionTicks++;
-
-                    if (activeBreakTarget != null) {
-                        activeBreakTicks++;
-                        if (!isBlocking(sp.level().getBlockState(activeBreakTarget))) {
-                            activeBreakTarget = null;
-                            activeBreakTicks = 0;
-                            activeBreakTimeout = 0;
-                        } else if (activeBreakTicks > activeBreakTimeout) {
-                            abortActiveBreak(sp);
-                        }
-                    }
-
-                    // Break blocks that are blocking us, like a real player
-                    // would when stuck in terrain. Try head, front, then feet.
-                    BlockPos headPos = sp.blockPosition().above();
-                    BlockState headState = sp.level().getBlockState(headPos);
-
-                    BlockPos frontPos = sp.blockPosition().relative(stuckFacing);
-                    BlockState frontState = sp.level().getBlockState(frontPos);
-
-                    BlockPos feetPos = sp.blockPosition();
-                    BlockState feetState = sp.level().getBlockState(feetPos);
-
-                    // Determine which block to break (priority: head > front > feet)
-                    if (isBlocking(headState)) {
-                        // Look at the head block and break it
-                        sp.setXRot(-90);  // look straight up
-                        startOrContinueBreak(sp, headPos);
-                    } else if (isBlocking(frontState)) {
-                        // Look at the front block and break it
-                        sp.setXRot(0);    // look straight ahead
-                        startOrContinueBreak(sp, frontPos);
-                    } else if (isBlocking(feetState)) {
-                        // Break the block at feet level (cobweb, etc.)
-                        sp.setXRot(90);   // look straight down
-                        startOrContinueBreak(sp, feetPos);
-                    }
-
-                    // Try jumping while breaking (real players do this)
-                    input.setJumping(true);
-                    input.setForward(0.5f);
-
-                    // Check if free — HORIZONTAL distance only
-                    Vec3 pos = sp.position();
-                    if (lastPosition != null) {
-                        double dx = pos.x - lastPosition.x;
-                        double dz = pos.z - lastPosition.z;
-                        double horizontalDist = Math.sqrt(dx * dx + dz * dz);
-                        if (horizontalDist > 1.0) {
-                            bodyLog.report("broke free");
-                            reset();
-                            return;
-                        }
-                    }
-
-                    // After 40 ticks of breaking, try backing away
-                    if (actionTicks > Math.max(80, activeBreakTimeout)) {
-                        abortActiveBreak(sp);
                         phase = Phase.BACK_AWAY;
                         actionTicks = 0;
                         escapeYaw = stuckFacing.getOpposite().toYRot();
-                        bodyLog.report("can't break free, backing up to try another way");
+                        bodyLog.report(SafetyMessages.recoveryPreservesWorld());
                     }
                 }
                 case BACK_AWAY -> {
@@ -340,7 +269,7 @@ public final class UnstuckChain implements TaskChain {
                         double dz = pos.z - lastPosition.z;
                         double horizontalDist = Math.sqrt(dx * dx + dz * dz);
                         if (horizontalDist > 2.0) {
-                            bodyLog.report("backed out, trying a new direction");
+                            bodyLog.report(SafetyMessages.text("unstuck.backed_out"));
                             reset();
                             return;
                         }
@@ -360,8 +289,7 @@ public final class UnstuckChain implements TaskChain {
                     // decide to place blocks to step up, dig through, or
                     // pick a completely different goal.
                     input.clear();
-                    bodyLog.report("stuck and can't escape with basic moves — "
-                            + "need to place blocks or dig, letting me decide");
+                    bodyLog.report(SafetyMessages.text("unstuck.give_up"));
                     // Extended cooldown after giving up. samePosTicks is reset
                     // by reset() below, but lastPosition is kept — and since
                     // the companion didn't actually move during the escape,
@@ -386,8 +314,6 @@ public final class UnstuckChain implements TaskChain {
 
     private void reset() {
         try {
-            ServerPlayer sp = ((CompanionEntity) companion).serverPlayer();
-            abortActiveBreak(sp);
             ((CompanionEntity) companion).inputDriver().clear();
         } catch (Exception ignored) {
             // Cleanup can race entity teardown during despawn.
@@ -397,31 +323,6 @@ public final class UnstuckChain implements TaskChain {
         actionTicks = 0;
         stuckDetector.reset();
         // Keep lastPosition for next detection cycle
-    }
-
-    private void startOrContinueBreak(ServerPlayer sp, BlockPos target) {
-        if (target == null || !isBlocking(sp.level().getBlockState(target))) return;
-        if (target.equals(activeBreakTarget)) return;
-        abortActiveBreak(sp);
-        int expected = BlockDigger.expectedBreakTicks(sp, target);
-        if (expected == Integer.MAX_VALUE) return;
-        // Unstuck is a short recovery policy, not an authorization to spend
-        // minutes mining a hard valuable block. Higher-level planning can
-        // choose a deliberate route if this bounded attempt fails.
-        activeBreakTimeout = Math.min(240, Math.max(40, expected));
-        if (BlockDigger.startBreaking(sp, target)) {
-            activeBreakTarget = target.immutable();
-            activeBreakTicks = 0;
-        }
-    }
-
-    private void abortActiveBreak(ServerPlayer sp) {
-        if (activeBreakTarget != null) {
-            BlockDigger.abortBreaking(sp, activeBreakTarget);
-        }
-        activeBreakTarget = null;
-        activeBreakTicks = 0;
-        activeBreakTimeout = 0;
     }
 
     // ── Helpers ────────────────────────────────────────────────────
