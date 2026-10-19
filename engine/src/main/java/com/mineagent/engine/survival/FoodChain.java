@@ -1,6 +1,7 @@
 package com.mineagent.engine.survival;
 
 import com.mineagent.api.entity.AgentPlayer;
+import com.mineagent.engine.i18n.ExecutorMessages;
 import com.mineagent.api.entity.InputDriver;
 import com.mineagent.api.task.TaskChain;
 import com.mineagent.api.task.reflex.ReflexRegistry;
@@ -93,7 +94,7 @@ public final class FoodChain implements TaskChain {
         Inventory inventory = sp.getInventory();
         FoodPolicy.FoodSlot food = FoodPolicy.getBestFood(inventory, companion.foodLevel());
         if (food == null) {
-            bodyLog.report("need to eat but have no safe food");
+            bodyLog.report(ExecutorMessages.text("body.food.missing"));
             retryCooldown = 100;
             cleanup(companion, false);
             return;
@@ -115,7 +116,7 @@ public final class FoodChain implements TaskChain {
         foodBefore = companion.foodLevel();
         useTicks = 0;
         phase = Phase.STARTING;
-        bodyLog.report("eating " + sp.getMainHandItem().getHoverName().getString());
+        bodyLog.report(ExecutorMessages.text("body.food.eating", sp.getMainHandItem().getHoverName().getString()));
     }
 
     private void startEating(AgentPlayer companion, ServerPlayer sp) {
@@ -131,7 +132,7 @@ public final class FoodChain implements TaskChain {
         if (!Interaction.useItem(sp, InteractionHand.MAIN_HAND)
                 || !sp.isUsingItem()
                 || sp.getUsedItemHand() != InteractionHand.MAIN_HAND) {
-            bodyLog.report("couldn't start eating " + selectedFoodId);
+            bodyLog.report(ExecutorMessages.text("body.food.startFailed", String.valueOf(selectedFoodId)));
             retryCooldown = 40;
             cleanup(companion, false);
             return;
@@ -143,7 +144,7 @@ public final class FoodChain implements TaskChain {
         useTicks++;
         if (sp.isUsingItem()) {
             if (useTicks <= MAX_USE_TICKS) return;
-            bodyLog.report("eating took too long and was cancelled");
+            bodyLog.report(ExecutorMessages.text("body.food.cancelled"));
             cleanup(companion, true);
             return;
         }
@@ -152,9 +153,9 @@ public final class FoodChain implements TaskChain {
         // increase avoids reporting knockback/interruption as a meal.
         if (companion.foodLevel() > foodBefore) {
             TaskContext.syncInventory(sp);
-            bodyLog.report("finished eating " + selectedFoodId);
+            bodyLog.report(ExecutorMessages.text("body.food.finished", String.valueOf(selectedFoodId)));
         } else {
-            bodyLog.report("eating was interrupted before completion");
+            bodyLog.report(ExecutorMessages.text("body.food.interrupted"));
             retryCooldown = 20;
         }
         cleanup(companion, false);

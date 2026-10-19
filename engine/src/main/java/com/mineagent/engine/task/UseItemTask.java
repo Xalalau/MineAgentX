@@ -1,6 +1,7 @@
 package com.mineagent.engine.task;
 
 import com.mineagent.api.entity.AgentPlayer;
+import com.mineagent.engine.i18n.ExecutorMessages;
 import com.mineagent.api.task.CompanionTask;
 import com.mineagent.api.task.TaskSnapshot;
 import com.mineagent.api.task.TaskState;
@@ -58,13 +59,13 @@ public final class UseItemTask extends CompanionTask<UseItemTool.UseItemTaskReco
         InteractionHand hand = hand();
         if (record.itemId != null
                 && !TaskContext.selectInventoryItemForHand(player, record.itemId, hand)) {
-            failReason = "Required item '" + record.itemId + "' is not in inventory";
+            failReason = ExecutorMessages.text("use.missing", record.itemId);
             phase = Phase.DONE;
             return;
         }
         var held = sp.getItemInHand(hand);
         if (held.isEmpty()) {
-            failReason = "The selected hand is empty";
+            failReason = ExecutorMessages.text("use.empty");
             phase = Phase.DONE;
             return;
         }
@@ -72,7 +73,7 @@ public final class UseItemTask extends CompanionTask<UseItemTool.UseItemTaskReco
         aim();
         if (sp.isUsingItem()) sp.stopUsingItem();
         if (!Interaction.useItem(sp, hand)) {
-            failReason = "Item rejected untargeted vanilla use";
+            failReason = ExecutorMessages.text("use.rejected");
             phase = Phase.DONE;
             return;
         }
@@ -85,7 +86,7 @@ public final class UseItemTask extends CompanionTask<UseItemTool.UseItemTaskReco
     protected TaskState onTick() {
         var sp = TaskContext.serverPlayer(player);
         if (record.deadline() > 0L && sp.level().getGameTime() >= record.deadline()) {
-            failReason = "Item use exceeded its deadline";
+            failReason = ExecutorMessages.text("use.deadline");
             cleanup(false);
             return TaskState.FAILED;
         }
@@ -99,7 +100,7 @@ public final class UseItemTask extends CompanionTask<UseItemTool.UseItemTaskReco
             // Losing the use state before an explicit requested hold duration
             // is evidence of interruption, not success.
             if (record.holdTicks > 0 && useTicks < record.holdTicks) {
-                failReason = "Item use stopped before the requested hold duration";
+                failReason = ExecutorMessages.text("use.stopped");
             }
             phase = Phase.DONE;
             TaskContext.syncInventory(sp);
@@ -151,8 +152,8 @@ public final class UseItemTask extends CompanionTask<UseItemTool.UseItemTaskReco
         String stage = phase == null ? "initializing"
                 : phase.name().toLowerCase(java.util.Locale.ROOT);
         int total = record.holdTicks > 0 ? record.holdTicks : -1;
-        return TaskSnapshot.progress(stage, "Using "
-                        + (usedItemId == null ? "held item" : usedItemId),
+        return TaskSnapshot.progress(stage, ExecutorMessages.text("use.snapshot",
+                        usedItemId == null ? ExecutorMessages.text("use.held") : usedItemId),
                 useTicks, total, null, null, null,
                 phase == Phase.DONE ? failReason : null,
                 "vanilla_use_accepted=" + (enteredUseState || phase == Phase.DONE),
@@ -161,23 +162,29 @@ public final class UseItemTask extends CompanionTask<UseItemTool.UseItemTaskReco
 
     @Override
     public IntentContract intentContract() {
-        return new IntentContract("Use " + (record.itemId == null
-                ? "the held item" : record.itemId),
-                "Vanilla accepts the use and any requested hold/release lifecycle completes",
+        return new IntentContract(ExecutorMessages.text("use.goal", record.itemId == null
+                ? ExecutorMessages.text("use.theHeld") : record.itemId),
+                ExecutorMessages.text("use.criterion"),
                 null, null, null, IntentContract.TerrainPolicy.CONSERVATIVE,
                 java.util.List.of());
     }
 
-    @Override protected String successMessage() {
-        return "Used " + (usedItemId == null ? "held item" : usedItemId)
-                + (record.holdTicks > 0 ? " for " + useTicks + " ticks" : "");
+    @Override protected String cancelledMessage() { return ExecutorMessages.text("task.cancelled"); }
+
+    @Override
+    protected String successMessage() {
+        return record.holdTicks > 0
+                ? ExecutorMessages.text("use.successHeld", usedItemId == null
+                        ? ExecutorMessages.text("use.held") : usedItemId, useTicks)
+                : ExecutorMessages.text("use.success", usedItemId == null
+                        ? ExecutorMessages.text("use.held") : usedItemId);
     }
 
     @Override protected String failureMessage() {
-        return failReason == null ? "Item use failed" : failReason;
+        return failReason == null ? ExecutorMessages.text("use.failed") : failReason;
     }
 
     @Override protected String timeoutMessage() {
-        return "Item use timed out after " + useTicks + " ticks";
+        return ExecutorMessages.text("use.timeout", useTicks);
     }
 }

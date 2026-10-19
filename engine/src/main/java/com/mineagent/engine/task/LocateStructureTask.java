@@ -1,6 +1,7 @@
 package com.mineagent.engine.task;
 
 import com.mineagent.api.entity.AgentPlayer;
+import com.mineagent.engine.i18n.ExecutorMessages;
 import com.mineagent.api.task.CompanionTask;
 import com.mineagent.api.task.TaskState;
 import com.mineagent.api.task.TaskSnapshot;
@@ -47,7 +48,7 @@ public final class LocateStructureTask
         ResourceLocation id = ResourceLocation.tryParse(
                 tagRequest ? requested.substring(1) : requested);
         if (id == null) {
-            failReason = "Invalid structure ID: " + requested;
+            failReason = ExecutorMessages.text("structure.invalid", String.valueOf(requested));
             return TaskState.FAILED;
         }
 
@@ -62,7 +63,7 @@ public final class LocateStructureTask
                     .map(HolderSet::direct).orElse(null);
         }
         if (candidates == null || candidates.size() == 0) {
-            failReason = "Structure " + requested + " is not registered in this world";
+            failReason = ExecutorMessages.text("structure.unregistered", String.valueOf(requested));
             return TaskState.FAILED;
         }
 
@@ -72,8 +73,7 @@ public final class LocateStructureTask
         var match = level.getChunkSource().getGenerator().findNearestMapStructure(
                 level, candidates, sp.blockPosition(), SEARCH_RADIUS_CHUNKS, false);
         if (match == null) {
-            failReason = "Structure " + requested + " was not found within "
-                    + SEARCH_RADIUS_CHUNKS + " chunks";
+            failReason = ExecutorMessages.text("structure.missing", String.valueOf(requested), SEARCH_RADIUS_CHUNKS);
             return TaskState.FAILED;
         }
         foundPos = match.getFirst();
@@ -88,7 +88,7 @@ public final class LocateStructureTask
     @Override
     public TaskSnapshot snapshot() {
         return TaskSnapshot.progress(searched ? "complete" : "searching",
-                "Locate structure " + record.structureType,
+                ExecutorMessages.text("structure.snapshot", String.valueOf(record.structureType)),
                 searched ? 1 : 0, 1,
                 foundPos == null ? null : foundPos.getX(),
                 foundPos == null ? null : foundPos.getY(),
@@ -99,23 +99,25 @@ public final class LocateStructureTask
     }
 
     @Override
+    protected String cancelledMessage() { return ExecutorMessages.text("task.cancelled"); }
+
+    @Override
     protected String successMessage() {
-        if (foundPos == null) return "Structure found";
+        if (foundPos == null) return ExecutorMessages.text("structure.found");
         BlockPos from = TaskContext.serverPlayer(player).blockPosition();
         double distance = Math.sqrt(from.distSqr(foundPos));
-        return "Found structure at (" + foundPos.getX() + ", " + foundPos.getY()
-                + ", " + foundPos.getZ() + ") distance="
-                + String.format(java.util.Locale.ROOT, "%.1f", distance);
+        return ExecutorMessages.text("structure.success", foundPos.getX(), foundPos.getY(),
+                foundPos.getZ(), String.format(java.util.Locale.ROOT, "%.1f", distance));
     }
 
     @Override
     protected String timeoutMessage() {
-        return "Structure search timed out for '" + record.structureType + "'";
+        return ExecutorMessages.text("structure.timeout", String.valueOf(record.structureType));
     }
 
     @Override
     protected String failureMessage() {
         return failReason != null ? failReason
-                : "Structure search failed for '" + record.structureType + "'";
+                : ExecutorMessages.text("structure.failure", String.valueOf(record.structureType));
     }
 }

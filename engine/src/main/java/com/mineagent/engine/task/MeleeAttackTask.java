@@ -2,6 +2,7 @@ package com.mineagent.engine.task;
 
 import com.mineagent.api.entity.AgentPlayer;
 import com.mineagent.api.safety.SafetyMessages;
+import com.mineagent.engine.i18n.ExecutorMessages;
 import com.mineagent.engine.safety.CombatSafety;
 import com.mineagent.api.task.CompanionTask;
 import com.mineagent.api.task.TaskState;
@@ -291,6 +292,11 @@ public class MeleeAttackTask extends CompanionTask<MeleeAttackTool.MeleeAttackTa
     @Override
     protected String successMessage() {
         return SafetyMessages.text("melee.success", record.entityId);
+    }
+
+    @Override
+    protected String cancelledMessage() {
+        return ExecutorMessages.text("task.cancelled");
     }
 
     @Override

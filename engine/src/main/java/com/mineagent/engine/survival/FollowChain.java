@@ -1,6 +1,7 @@
 package com.mineagent.engine.survival;
 
 import com.mineagent.api.entity.AgentPlayer;
+import com.mineagent.engine.i18n.ExecutorMessages;
 import com.mineagent.api.task.TaskChain;
 import com.mineagent.engine.MineAgentEngine;
 import com.mineagent.engine.entity.CompanionEntity;
@@ -48,7 +49,7 @@ public final class FollowChain implements TaskChain {
                 following = false;
                 failureCooldown = FAILURE_COOLDOWN_TICKS;
                 TaskContext.inputDriver(companion).clear();
-                bodyLog.report("couldn't find a safe route to the owner: " + reason);
+                bodyLog.report(ExecutorMessages.text("body.follow.route", String.valueOf(reason)));
             }
         });
         return created;
@@ -104,12 +105,12 @@ public final class FollowChain implements TaskChain {
                     // dimension. Build a fresh core after cross-level travel.
                     if (differentDimension) nav = createNav();
                     bodyLog.report(differentDimension
-                            ? "joined the owner in their dimension"
-                            : "caught up after falling far behind");
+                            ? ExecutorMessages.text("body.follow.dimension")
+                            : ExecutorMessages.text("body.follow.caughtUp"));
                     following = false;
                     lastOwnerGoal = null;
                 } else {
-                    bodyLog.report("couldn't find a safe place beside the owner");
+                    bodyLog.report(ExecutorMessages.text("body.follow.noPlace"));
                     failureCooldown = FAILURE_COOLDOWN_TICKS;
                     following = false;
                 }

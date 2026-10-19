@@ -1,6 +1,7 @@
 package com.mineagent.engine.task;
 
 import com.mineagent.api.entity.AgentPlayer;
+import com.mineagent.engine.i18n.ExecutorMessages;
 import com.mineagent.api.task.CompanionTask;
 import com.mineagent.api.task.TaskState;
 import com.mineagent.api.task.TaskSnapshot;
@@ -43,14 +44,14 @@ public final class LocateBiomeTask
 
         ResourceLocation id = ResourceLocation.tryParse(record.biomeType);
         if (id == null) {
-            failReason = "Invalid biome ID: " + record.biomeType;
+            failReason = ExecutorMessages.text("biome.invalid", String.valueOf(record.biomeType));
             return TaskState.FAILED;
         }
         ResourceKey<Biome> key = ResourceKey.create(Registries.BIOME, id);
         var level = sp.serverLevel();
         var registry = level.registryAccess().registryOrThrow(Registries.BIOME);
         if (!registry.containsKey(key)) {
-            failReason = "Biome " + record.biomeType + " is not registered in this world";
+            failReason = ExecutorMessages.text("biome.unregistered", String.valueOf(record.biomeType));
             return TaskState.FAILED;
         }
 
@@ -67,8 +68,7 @@ public final class LocateBiomeTask
                         SEARCH_RADIUS_BLOCKS, SAMPLE_INTERVAL,
                         holder -> holder.is(key), random, true, sampler);
         if (match == null) {
-            failReason = "Biome " + record.biomeType + " was not found within "
-                    + SEARCH_RADIUS_BLOCKS + " blocks";
+            failReason = ExecutorMessages.text("biome.missing", String.valueOf(record.biomeType), SEARCH_RADIUS_BLOCKS);
             return TaskState.FAILED;
         }
         foundPos = match.getFirst();
@@ -83,7 +83,7 @@ public final class LocateBiomeTask
     @Override
     public TaskSnapshot snapshot() {
         return TaskSnapshot.progress(searched ? "complete" : "searching",
-                "Locate biome " + record.biomeType,
+                ExecutorMessages.text("biome.snapshot", String.valueOf(record.biomeType)),
                 searched ? 1 : 0, 1,
                 foundPos == null ? null : foundPos.getX(),
                 foundPos == null ? null : foundPos.getY(),
@@ -94,24 +94,26 @@ public final class LocateBiomeTask
     }
 
     @Override
+    protected String cancelledMessage() { return ExecutorMessages.text("task.cancelled"); }
+
+    @Override
     protected String successMessage() {
-        if (foundPos == null) return "Biome found";
+        if (foundPos == null) return ExecutorMessages.text("biome.found");
         BlockPos from = TaskContext.serverPlayer(player).blockPosition();
         double distance = Math.hypot(from.getX() - foundPos.getX(),
                 from.getZ() - foundPos.getZ());
-        return "Found biome at (" + foundPos.getX() + ", " + foundPos.getY()
-                + ", " + foundPos.getZ() + ") distance="
-                + String.format(java.util.Locale.ROOT, "%.1f", distance);
+        return ExecutorMessages.text("biome.success", foundPos.getX(), foundPos.getY(),
+                foundPos.getZ(), String.format(java.util.Locale.ROOT, "%.1f", distance));
     }
 
     @Override
     protected String timeoutMessage() {
-        return "Biome search timed out for '" + record.biomeType + "'";
+        return ExecutorMessages.text("biome.timeout", String.valueOf(record.biomeType));
     }
 
     @Override
     protected String failureMessage() {
         return failReason != null ? failReason
-                : "Biome search failed for '" + record.biomeType + "'";
+                : ExecutorMessages.text("biome.failure", String.valueOf(record.biomeType));
     }
 }

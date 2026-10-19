@@ -1,6 +1,7 @@
 package com.mineagent.engine.task;
 
 import com.mineagent.api.entity.AgentPlayer;
+import com.mineagent.engine.i18n.ExecutorMessages;
 import com.mineagent.api.task.CompanionTask;
 import com.mineagent.api.task.TaskState;
 import com.mineagent.api.task.TaskSnapshot;
@@ -46,15 +47,15 @@ public final class EatItemTask extends CompanionTask<EatItemTool.EatItemTaskReco
         int foodSlot = findFoodSlot(inventory);
         if (foodSlot < 0) {
             failReason = record.itemId == null
-                    ? "No safe food is available in the main inventory"
-                    : "Food item '" + record.itemId + "' is not available in the main inventory";
+                    ? ExecutorMessages.text("eat.noFood")
+                    : ExecutorMessages.text("eat.missing", String.valueOf(record.itemId));
             return;
         }
 
         ItemStack selectedFood = inventory.getItem(foodSlot);
         var food = selectedFood.get(DataComponents.FOOD);
         if (food == null || !serverPlayer.canEat(food.canAlwaysEat())) {
-            failReason = "Companion is not hungry enough to eat this item";
+            failReason = ExecutorMessages.text("eat.notHungry");
             return;
         }
 
@@ -79,7 +80,7 @@ public final class EatItemTask extends CompanionTask<EatItemTool.EatItemTaskReco
         startedUse = Interaction.useItem(serverPlayer, InteractionHand.MAIN_HAND)
                 && serverPlayer.isUsingItem()
                 && serverPlayer.getUsedItemHand() == InteractionHand.MAIN_HAND;
-        if (!startedUse) failReason = "Vanilla rejected the attempt to start eating " + foodId;
+        if (!startedUse) failReason = ExecutorMessages.text("eat.rejected", String.valueOf(foodId));
     }
 
     @Override
@@ -88,19 +89,19 @@ public final class EatItemTask extends CompanionTask<EatItemTool.EatItemTaskReco
         if (failReason != null) return TaskState.FAILED;
         long now = serverPlayer.level().getGameTime();
         if (record.deadline() > 0L && now >= record.deadline()) {
-            failReason = "Eating exceeded its task deadline";
+            failReason = ExecutorMessages.text("eat.deadline");
             stopUse();
             return TaskState.FAILED;
         }
 
         if (serverPlayer.isUsingItem()) {
             if (serverPlayer.getUsedItemHand() != InteractionHand.MAIN_HAND) {
-                failReason = "Another item use replaced the eating action";
+                failReason = ExecutorMessages.text("eat.replaced");
                 stopUse();
                 return TaskState.FAILED;
             }
             if (++elapsedUseTicks <= maxUseTicks) return TaskState.RUNNING;
-            failReason = "Eating did not finish within the item's expected use duration";
+            failReason = ExecutorMessages.text("eat.duration");
             stopUse();
             return TaskState.FAILED;
         }
@@ -109,7 +110,7 @@ public final class EatItemTask extends CompanionTask<EatItemTool.EatItemTaskReco
         boolean consumed = matchingAfter < matchingCountBefore;
         boolean fed = serverPlayer.getFoodData().getFoodLevel() > foodLevelBefore;
         if (!consumed && !fed) {
-            failReason = "Eating was interrupted before the food was consumed";
+            failReason = ExecutorMessages.text("eat.interrupted");
             return TaskState.FAILED;
         }
         TaskContext.syncInventory(serverPlayer);
@@ -178,7 +179,7 @@ public final class EatItemTask extends CompanionTask<EatItemTool.EatItemTaskReco
         else if (serverPlayer != null && serverPlayer.isUsingItem()) stage = "eating";
         else stage = "verifying";
         return TaskSnapshot.progress(stage,
-                foodId == null ? "Selecting food" : "Eating " + foodId,
+                foodId == null ? ExecutorMessages.text("eat.selecting") : ExecutorMessages.text("eat.snapshot", String.valueOf(foodId)),
                 Math.min(elapsedUseTicks, Math.max(1, maxUseTicks)),
                 Math.max(1, maxUseTicks), null, null, null,
                 failReason, foodId == null ? null : "food=" + foodId,
@@ -186,13 +187,16 @@ public final class EatItemTask extends CompanionTask<EatItemTool.EatItemTaskReco
     }
 
     @Override
-    protected String successMessage() { return "Ate one " + foodId; }
+    protected String cancelledMessage() { return ExecutorMessages.text("task.cancelled"); }
+
+    @Override
+    protected String successMessage() { return ExecutorMessages.text("eat.success", String.valueOf(foodId)); }
 
     @Override
     protected String failureMessage() {
-        return failReason != null ? failReason : "Eating failed";
+        return failReason != null ? failReason : ExecutorMessages.text("eat.failure");
     }
 
     @Override
-    protected String timeoutMessage() { return "Eating timed out for " + foodId; }
+    protected String timeoutMessage() { return ExecutorMessages.text("eat.timeout", String.valueOf(foodId)); }
 }

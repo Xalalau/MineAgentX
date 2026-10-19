@@ -2,6 +2,7 @@ package com.mineagent.engine.task;
 
 import com.mineagent.api.entity.AgentPlayer;
 import com.mineagent.api.safety.SafetyMessages;
+import com.mineagent.engine.i18n.ExecutorMessages;
 import com.mineagent.api.task.CompanionTask;
 import com.mineagent.api.task.TaskState;
 import com.mineagent.api.task.TaskSnapshot;
@@ -225,6 +226,9 @@ public class InteractEntityTask extends CompanionTask<InteractEntityTool.Interac
     }
     @Override protected String successMessage() {
         return SafetyMessages.text("entity.success", record.entityId, record.button);
+    }
+    @Override protected String cancelledMessage() {
+        return ExecutorMessages.text("task.cancelled");
     }
     @Override protected String timeoutMessage() {
         return SafetyMessages.text("entity.timeout", record.entityId);

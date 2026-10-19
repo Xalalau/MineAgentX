@@ -1,6 +1,7 @@
 package com.mineagent.engine.survival;
 
 import com.mineagent.api.entity.AgentPlayer;
+import com.mineagent.engine.i18n.ExecutorMessages;
 import com.mineagent.api.task.TaskChain;
 import com.mineagent.engine.act.Interaction;
 import com.mineagent.engine.entity.CompanionEntity;
@@ -114,7 +115,7 @@ public final class MLGChain implements TaskChain {
     private void placeWhenReachable(ServerPlayer sp) {
         phaseTicks++;
         if (!sp.getMainHandItem().is(Items.WATER_BUCKET)) {
-            bodyLog.report("lost the water bucket before the landing save");
+            bodyLog.report(ExecutorMessages.text("body.mlg.lost"));
             cleanup(sp);
             return;
         }
@@ -131,7 +132,7 @@ public final class MLGChain implements TaskChain {
         waterPos = landingBlock.above();
 
         if (sp.onGround() || landing.distance() < 0.0) {
-            bodyLog.report("reached the ground before water could be placed");
+            bodyLog.report(ExecutorMessages.text("body.mlg.ground"));
             cleanup(sp);
             return;
         }
@@ -144,11 +145,11 @@ public final class MLGChain implements TaskChain {
         waterPlaced = sp.level().getFluidState(waterPos).is(FluidTags.WATER)
                 && sp.getMainHandItem().is(Items.BUCKET);
         if (waterPlaced) {
-            bodyLog.report("placed water beneath me to break the fall");
+            bodyLog.report(ExecutorMessages.text("body.mlg.placed"));
             phase = Phase.WAITING_FOR_LAND;
             phaseTicks = 0;
         } else if (phaseTicks > 20) {
-            bodyLog.report("couldn't place water at the predicted landing block");
+            bodyLog.report(ExecutorMessages.text("body.mlg.failed"));
             cleanup(sp);
         }
     }
@@ -164,7 +165,7 @@ public final class MLGChain implements TaskChain {
             return;
         }
         if (phaseTicks > 60) {
-            bodyLog.report("water was placed but the landing position changed");
+            bodyLog.report(ExecutorMessages.text("body.mlg.changed"));
             cleanup(sp);
         }
     }
@@ -177,7 +178,7 @@ public final class MLGChain implements TaskChain {
             return;
         }
         if (!sp.getMainHandItem().is(Items.BUCKET)) {
-            bodyLog.report("landed safely but no empty bucket was available for recovery");
+            bodyLog.report(ExecutorMessages.text("body.mlg.noBucket"));
             cleanup(sp);
             return;
         }
@@ -187,10 +188,10 @@ public final class MLGChain implements TaskChain {
         TaskContext.syncInventory(sp);
         if (sp.getMainHandItem().is(Items.WATER_BUCKET)
                 && !sp.level().getFluidState(waterPos).is(FluidTags.WATER)) {
-            bodyLog.report("recovered the water bucket after landing");
+            bodyLog.report(ExecutorMessages.text("body.mlg.recovered"));
             cleanup(sp);
         } else if (phaseTicks > MAX_RECOVERY_TICKS) {
-            bodyLog.report("landed safely but couldn't recover the water source");
+            bodyLog.report(ExecutorMessages.text("body.mlg.recoveryFailed"));
             cleanup(sp);
         }
     }

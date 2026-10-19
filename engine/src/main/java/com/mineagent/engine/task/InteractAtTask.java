@@ -1,6 +1,7 @@
 package com.mineagent.engine.task;
 
 import com.mineagent.api.entity.AgentPlayer;
+import com.mineagent.engine.i18n.ExecutorMessages;
 import com.mineagent.api.task.CompanionTask;
 import com.mineagent.api.task.TaskState;
 import com.mineagent.api.task.TaskSnapshot;
@@ -44,7 +45,7 @@ public class InteractAtTask extends CompanionTask<InteractAtTool.InteractAtTaskR
                 if (phase == Phase.NAVIGATE) phase = Phase.INTERACT;
             }
             @Override public void onNavigationFailed(String reason) {
-                failReason = "Navigation to block failed: " + reason;
+                failReason = ExecutorMessages.text("interact.navigation", String.valueOf(reason));
                 phase = Phase.DONE;
             }
         });
@@ -96,7 +97,7 @@ public class InteractAtTask extends CompanionTask<InteractAtTool.InteractAtTaskR
                 : net.minecraft.world.InteractionHand.MAIN_HAND;
         if (record.itemId != null
                 && !TaskContext.selectInventoryItemForHand(player, record.itemId, hand)) {
-            failReason = "Required item '" + record.itemId + "' is not in inventory";
+            failReason = ExecutorMessages.text("use.missing", record.itemId);
             phase = Phase.DONE;
             return;
         }
@@ -116,8 +117,7 @@ public class InteractAtTask extends CompanionTask<InteractAtTool.InteractAtTaskR
                     // Preserve the executor's exact evidence. The old generic
                     // message caused the model to invent protection regions
                     // for ordinary reach and line-of-sight failures.
-                    failReason = "Could not start block attack: "
-                            + assessment.diagnostic();
+                    failReason = ExecutorMessages.text("interact.breakRejected", assessment.diagnostic());
                     phase = Phase.DONE;
                     return;
                 }
@@ -127,7 +127,7 @@ public class InteractAtTask extends CompanionTask<InteractAtTool.InteractAtTaskR
             if (++interactTicks > breakTimeoutTicks) {
                 BlockDigger.abortBreaking(sp, target);
                 breakStarted = false;
-                failReason = "Block did not break before interaction timeout";
+                failReason = ExecutorMessages.text("interact.breakTimeout");
                 phase = Phase.DONE;
             }
             return;
@@ -143,7 +143,7 @@ public class InteractAtTask extends CompanionTask<InteractAtTool.InteractAtTaskR
                 default -> false;
             };
             if (!accepted) {
-                failReason = "Block rejected the requested interaction";
+                failReason = ExecutorMessages.text("interact.rejected");
                 phase = Phase.DONE;
                 return;
             }
@@ -237,7 +237,7 @@ public class InteractAtTask extends CompanionTask<InteractAtTool.InteractAtTaskR
                 ? Math.max(1, breakTimeoutTicks)
                 : Math.max(1, Math.min(record.holdTicks, MAX_HOLD_TICKS));
         return TaskSnapshot.progress(stage,
-                "Interact with block using " + record.button,
+                ExecutorMessages.text("interact.snapshot", String.valueOf(record.button)),
                 Math.min(interactTicks, required), required,
                 record.x, record.y, record.z,
                 phase == Phase.DONE ? failReason : null,
@@ -245,25 +245,26 @@ public class InteractAtTask extends CompanionTask<InteractAtTool.InteractAtTaskR
                 ((long) interactTicks << 3) ^ (phase == null ? 0L : phase.ordinal()));
     }
     @Override public IntentContract intentContract() {
-        return new IntentContract("Interact with the requested block",
-                "Vanilla accepts the requested interaction"
-                        + ("attack".equals(record.button) ? " and the target becomes air" : ""),
+        return new IntentContract(ExecutorMessages.text("interact.goal"),
+                ExecutorMessages.text("attack".equals(record.button)
+                        ? "interact.breakCriterion" : "interact.criterion"),
                 record.x, record.y, record.z,
                 IntentContract.TerrainPolicy.CONSERVATIVE,
                 java.util.List.of(new IntentContract.Constraint("target_only",
                         IntentContract.ConstraintKind.HARD,
-                        "Navigation may not modify unrelated terrain",
+                        ExecutorMessages.text("interact.terrain"),
                         "interaction")));
     }
-    @Override protected String successMessage() {
-        return "Interacted at (" + record.x + ", " + record.y + ", " + record.z
-                + ") with button=" + record.button;
+    @Override protected String cancelledMessage() { return ExecutorMessages.text("task.cancelled"); }
+
+    @Override
+    protected String successMessage() {
+        return ExecutorMessages.text("interact.success", record.x, record.y, record.z, String.valueOf(record.button));
     }
     @Override protected String timeoutMessage() {
-        return "Interaction timed out at (" + record.x + ", " + record.y + ", " + record.z + ")";
+        return ExecutorMessages.text("interact.timeout", record.x, record.y, record.z);
     }
     @Override protected String failureMessage() {
-        return failReason != null ? failReason : "Interaction failed at ("
-                + record.x + ", " + record.y + ", " + record.z + ")";
+        return failReason != null ? failReason : ExecutorMessages.text("interact.failure", record.x, record.y, record.z);
     }
 }

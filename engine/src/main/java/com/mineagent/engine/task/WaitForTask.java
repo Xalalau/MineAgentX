@@ -1,6 +1,7 @@
 package com.mineagent.engine.task;
 
 import com.mineagent.api.entity.AgentPlayer;
+import com.mineagent.engine.i18n.ExecutorMessages;
 import com.mineagent.api.task.CompanionTask;
 import com.mineagent.api.task.TaskSnapshot;
 import com.mineagent.api.task.TaskState;
@@ -53,17 +54,16 @@ public final class WaitForTask extends CompanionTask<WaitForTool.WaitForTaskReco
             // but scheduler extensions may construct them directly. Fail
             // deterministically instead of letting a malformed record escape
             // as a NullPointerException from the deadline check below.
-            failReason = "Wait task record is null";
+            failReason = ExecutorMessages.text("wait.null");
             return TaskState.FAILED;
         }
         if (record.kind == null || record.kind.isBlank()) {
-            failReason = "Wait task kind is missing";
+            failReason = ExecutorMessages.text("wait.kind");
             return TaskState.FAILED;
         }
         long tick = now();
         if (record.deadline() > 0L && tick >= record.deadline()) {
-            failReason = "Condition timed out after waiting "
-                    + Math.max(0L, tick - startedTick) + " ticks";
+            failReason = ExecutorMessages.text("wait.elapsed", Math.max(0L, tick - startedTick));
             return TaskState.FAILED;
         }
         boolean satisfied = condition(tick);
@@ -205,7 +205,7 @@ public final class WaitForTask extends CompanionTask<WaitForTool.WaitForTaskReco
         String kind = record == null || record.kind == null ? "invalid" : record.kind;
         boolean positioned = "block".equals(kind) || "entity".equals(kind);
         int requiredStable = record == null ? 1 : Math.max(1, record.stableTicks);
-        return TaskSnapshot.progress(kind, "Waiting for " + kind,
+        return TaskSnapshot.progress(kind, ExecutorMessages.text("wait.snapshot", kind),
                 stable, requiredStable,
                 positioned && record != null ? record.x : null,
                 positioned && record != null ? record.y : null,
@@ -216,22 +216,25 @@ public final class WaitForTask extends CompanionTask<WaitForTool.WaitForTaskReco
     }
 
     @Override public IntentContract intentContract() {
-        String kind = record == null || record.kind == null ? "condition" : record.kind;
-        return new IntentContract("Wait for " + kind,
-                "The requested server condition remains true for the required stability window",
+        String kind = record == null || record.kind == null
+                ? ExecutorMessages.text("wait.condition") : record.kind;
+        return new IntentContract(ExecutorMessages.text("wait.goal", kind),
+                ExecutorMessages.text("wait.criterion"),
                 null, null, null, IntentContract.TerrainPolicy.CONSERVATIVE,
                 java.util.List.of());
     }
 
-    @Override protected String successMessage() {
-        if (record == null) return "Wait condition verified";
-        return "Condition '" + record.kind + "' verified for "
-                + Math.max(1, record.stableTicks) + " ticks";
+    @Override protected String cancelledMessage() { return ExecutorMessages.text("task.cancelled"); }
+
+    @Override
+    protected String successMessage() {
+        if (record == null) return ExecutorMessages.text("wait.verified");
+        return ExecutorMessages.text("wait.success", String.valueOf(record.kind), Math.max(1, record.stableTicks));
     }
     @Override protected String timeoutMessage() {
-        return failReason == null ? "Wait condition timed out" : failReason;
+        return failReason == null ? ExecutorMessages.text("wait.timeout") : failReason;
     }
     @Override protected String failureMessage() {
-        return failReason == null ? "Wait condition failed" : failReason;
+        return failReason == null ? ExecutorMessages.text("wait.failed") : failReason;
     }
 }

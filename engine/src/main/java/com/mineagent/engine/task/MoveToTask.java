@@ -1,6 +1,7 @@
 package com.mineagent.engine.task;
 
 import com.mineagent.api.entity.AgentPlayer;
+import com.mineagent.engine.i18n.ExecutorMessages;
 import com.mineagent.api.task.CompanionTask;
 import com.mineagent.api.task.TaskState;
 import com.mineagent.api.task.TaskSnapshot;
@@ -81,7 +82,7 @@ public class MoveToTask extends CompanionTask<MoveToTool.MoveToTaskRecord>
             case "block" -> nav.navigateToBlock(record.x, safeY, safeZ);
             default -> {
                 navFailed = true;
-                failReason = "Invalid goal_mode: " + record.goalMode;
+                failReason = ExecutorMessages.text("nav.invalidMode", String.valueOf(record.goalMode));
             }
         }
 
@@ -131,7 +132,7 @@ public class MoveToTask extends CompanionTask<MoveToTool.MoveToTaskRecord>
             System.out.println("[MineAgent] MoveTo lease expired: " + reason);
             nav.cancel();
             TaskContext.inputDriver(player).clear();
-            failReason = "Navigation lease expired: " + reason;
+            failReason = ExecutorMessages.text("nav.lease", String.valueOf(reason));
             return TaskState.FAILED;
         }
 
@@ -175,8 +176,8 @@ public class MoveToTask extends CompanionTask<MoveToTool.MoveToTaskRecord>
         long version = ((long) Math.max(0, completed) << 32)
                 ^ executorVersion ^ (goalReached ? 2L : 0L) ^ (navFailed ? 1L : 0L);
         return TaskSnapshot.progress(stage,
-                goalReached ? "Navigation goal reached"
-                        : navFailed ? "Navigation failed" : "Navigating to requested goal",
+                goalReached ? ExecutorMessages.text("nav.reached")
+                        : navFailed ? ExecutorMessages.text("nav.failed") : ExecutorMessages.text("nav.running"),
                 completed, total, targetX, targetY, targetZ,
                 navFailed ? failReason : null,
                 evidence.toString(), version);
@@ -195,22 +196,25 @@ public class MoveToTask extends CompanionTask<MoveToTool.MoveToTaskRecord>
                 true, true, true, true, placementBudget, 16,
                 Math.max(4, targetY - currentY + 4),
                 IntentContract.CleanupMode.CONTEXTUAL);
-        return new IntentContract("Reach the requested navigation goal",
-                "The executor verifies the exact selected goal predicate",
+        return new IntentContract(ExecutorMessages.text("nav.goal"),
+                ExecutorMessages.text("nav.criterion"),
                 "y".equals(record.goalMode) ? null : record.x,
                 "xz".equals(record.goalMode) ? null : record.y,
                 "y".equals(record.goalMode) ? null : record.z,
                 policy, java.util.List.of(
                 new IntentContract.Constraint("goal_exactness",
                         IntentContract.ConstraintKind.HARD,
-                        "Do not report success unless the requested goal predicate is true",
+                        ExecutorMessages.text("nav.exact"),
                         "navigation")));
     }
 
     @Override
+    protected String cancelledMessage() { return ExecutorMessages.text("task.cancelled"); }
+
+    @Override
     protected String successMessage() {
         var pos = TaskContext.serverPlayer(player).blockPosition();
-        return "Arrived at (" + pos.getX() + ", " + pos.getY() + ", " + pos.getZ() + ")";
+        return ExecutorMessages.text("nav.arrived", pos.getX(), pos.getY(), pos.getZ());
     }
 
     @Override
@@ -218,11 +222,9 @@ public class MoveToTask extends CompanionTask<MoveToTool.MoveToTaskRecord>
         var pos = TaskContext.serverPlayer(player).blockPosition();
         long gameTime = TaskContext.serverPlayer(player).level().getGameTime();
         String reason = lease.expirationReason(gameTime);
-        return "Navigation timed out at (" + pos.getX() + ", " + pos.getY() + ", " + pos.getZ()
-                + ") heading for mode=" + record.goalMode
-                + " target=(" + record.x + ", " + (record.y != null ? record.y : "null")
-                + ", " + (record.z != null ? record.z : "null") + ")"
-                + " reason=" + reason;
+        return ExecutorMessages.text("nav.timeout", pos.getX(), pos.getY(), pos.getZ(),
+                String.valueOf(record.goalMode), record.x, String.valueOf(record.y),
+                String.valueOf(record.z), String.valueOf(reason));
     }
 
     @Override
@@ -230,11 +232,10 @@ public class MoveToTask extends CompanionTask<MoveToTool.MoveToTaskRecord>
         String yStr = record.y != null ? record.y.toString() : "null";
         String zStr = record.z != null ? record.z.toString() : "null";
         if (failReason != null) {
-            return "Navigation failed: " + failReason
-                    + " (mode=" + record.goalMode
-                    + " target=(" + record.x + ", " + yStr + ", " + zStr + "))";
+            return ExecutorMessages.text("nav.failureReason", failReason,
+                    String.valueOf(record.goalMode), record.x, yStr, zStr);
         }
-        return "Navigation failed (mode=" + record.goalMode
-                + " target=(" + record.x + ", " + yStr + ", " + zStr + ")";
+        return ExecutorMessages.text("nav.failureTarget", String.valueOf(record.goalMode),
+                record.x, yStr, zStr);
     }
 }

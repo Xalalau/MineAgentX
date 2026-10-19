@@ -1,6 +1,7 @@
 package com.mineagent.engine.task;
 
 import com.mineagent.api.entity.AgentPlayer;
+import com.mineagent.engine.i18n.ExecutorMessages;
 import com.mineagent.api.task.CompanionTask;
 import com.mineagent.api.task.TaskState;
 import com.mineagent.api.task.TaskSnapshot;
@@ -115,7 +116,7 @@ public class BuildTask extends CompanionTask<BuildTool.BuildTaskRecord>
 
             @Override
             public void onNavigationFailed(String reason) {
-                failReason = "Navigation failed: " + reason;
+                failReason = ExecutorMessages.text("mine.navigation", String.valueOf(reason));
                 phase = Phase.DONE;
             }
         });
@@ -175,8 +176,7 @@ public class BuildTask extends CompanionTask<BuildTool.BuildTaskRecord>
                     recordPlacedAsset(target, state);
                     advancePosition();
                 } else {
-                    failReason = "Position already contains a different block at ("
-                            + pos[0] + "," + pos[1] + "," + pos[2] + ")";
+                    failReason = ExecutorMessages.text("build.occupied", pos[0], pos[1], pos[2]);
                     phase = Phase.DONE;
                 }
                 return;
@@ -217,8 +217,7 @@ public class BuildTask extends CompanionTask<BuildTool.BuildTaskRecord>
                 // afterwards; survival/adventure retain the strict inventory
                 // requirement and therefore cannot duplicate items.
                 if (!sp.isCreative() || desiredItem == net.minecraft.world.item.Items.AIR) {
-                    failReason = "No '" + record.blockType + "' in inventory for position "
-                            + currentIndex + " (" + pos[0] + "," + pos[1] + "," + pos[2] + ")";
+                    failReason = ExecutorMessages.text("build.missing", String.valueOf(record.blockType), currentIndex, pos[0], pos[1], pos[2]);
                     phase = Phase.DONE;
                     return;
                 }
@@ -238,8 +237,7 @@ public class BuildTask extends CompanionTask<BuildTool.BuildTaskRecord>
                         recordPlacedAsset(target, newState);
                         advancePosition();
                     } else if (actTicks > MAX_PLACE_TICKS) {
-                        failReason = "Failed to place block at (" + pos[0] + ","
-                                + pos[1] + "," + pos[2] + "): " + lastPlaceFailure;
+                        failReason = ExecutorMessages.text("build.placeFailed", pos[0], pos[1], pos[2], String.valueOf(lastPlaceFailure));
                         phase = Phase.DONE;
                     }
                 } finally {
@@ -284,8 +282,7 @@ public class BuildTask extends CompanionTask<BuildTool.BuildTaskRecord>
                 recordPlacedAsset(target, newState);
                 advancePosition();
             } else if (actTicks > MAX_PLACE_TICKS) {
-                failReason = "Failed to place block at (" + pos[0] + ","
-                        + pos[1] + "," + pos[2] + "): " + lastPlaceFailure
+                failReason = ExecutorMessages.text("build.placeFailed", pos[0], pos[1], pos[2], String.valueOf(lastPlaceFailure))
                         + "; player=" + sp.blockPosition();
                 System.err.println("[MineAgent] " + failReason
                         + "; requested=" + record.blockType
@@ -309,9 +306,7 @@ public class BuildTask extends CompanionTask<BuildTool.BuildTaskRecord>
                 BlockDigger.BreakAssessment assessment =
                         BlockDigger.startBreakingDetailed(sp, target);
                 if (!assessment.allowed()) {
-                    failReason = "Target block cannot be cleared at ("
-                            + pos[0] + "," + pos[1] + "," + pos[2] + "); "
-                            + assessment.diagnostic();
+                    failReason = ExecutorMessages.text("build.clearRejected", pos[0], pos[1], pos[2], assessment.diagnostic());
                     phase = Phase.DONE;
                     return;
                 }
@@ -326,7 +321,7 @@ public class BuildTask extends CompanionTask<BuildTool.BuildTaskRecord>
             } else if (actTicks > actTimeoutTicks) {
                 BlockDigger.abortBreaking(sp, target);
                 activeBreakTarget = null;
-                failReason = "Failed to clear block at (" + pos[0] + "," + pos[1] + "," + pos[2] + ")";
+                failReason = ExecutorMessages.text("build.clearFailed", pos[0], pos[1], pos[2]);
                 phase = Phase.DONE;
             }
         }
@@ -458,7 +453,7 @@ public class BuildTask extends CompanionTask<BuildTool.BuildTaskRecord>
                 ^ ((long) Math.max(0, currentIndex) << 4)
                 ^ (phase == null ? 0L : phase.ordinal());
         return TaskSnapshot.progress(stage,
-                snapshotRecordValid ? record.mode + " " + record.blockType : "Invalid build task",
+                snapshotRecordValid ? record.mode + " " + record.blockType : ExecutorMessages.text("build.invalid"),
                 completedCount, total,
                 target == null ? null : target[0],
                 target == null ? null : target[1],
@@ -472,19 +467,19 @@ public class BuildTask extends CompanionTask<BuildTool.BuildTaskRecord>
     @Override
     public IntentContract intentContract() {
         if (record == null || record.positions == null || record.positions.length == 0) {
-            return IntentContract.generic("Invalid build task",
-                    "A valid build record is required", null, null, null);
+            return IntentContract.generic(ExecutorMessages.text("build.invalid"),
+                    ExecutorMessages.text("build.required"), null, null, null);
         }
         for (int[] position : record.positions) {
             if (position == null || position.length != 3) {
-                return IntentContract.generic("Invalid build task",
-                        "Every build position must contain exactly three coordinates",
+                return IntentContract.generic(ExecutorMessages.text("build.invalid"),
+                        ExecutorMessages.text("build.coordinates"),
                         null, null, null);
             }
         }
         if (!"place".equals(record.mode) && !"clear".equals(record.mode)) {
-            return IntentContract.generic("Invalid build task",
-                    "Build mode must be 'place' or 'clear'", null, null, null);
+            return IntentContract.generic(ExecutorMessages.text("build.invalid"),
+                    ExecutorMessages.text("build.mode"), null, null, null);
         }
         int currentY = TaskContext.serverPlayer(player).blockPosition().getY();
         int highestY = currentY;
@@ -493,63 +488,65 @@ public class BuildTask extends CompanionTask<BuildTool.BuildTaskRecord>
                 false, true, true, false, 32, 0,
                 Math.max(4, highestY - currentY + 4),
                 IntentContract.CleanupMode.CONTEXTUAL);
-        return new IntentContract(record.mode + " requested build cells",
-                "Every requested cell is verified against the desired world state",
+        return new IntentContract(ExecutorMessages.text("build.goal", String.valueOf(record.mode)),
+                ExecutorMessages.text("build.criterion"),
                 null, null, null, policy, java.util.List.of(
                 new IntentContract.Constraint("build_output",
                         IntentContract.ConstraintKind.HARD,
-                        "Requested build cells are permanent output; only navigation supports are temporary",
+                        ExecutorMessages.text("build.output"),
                         "building"),
                 new IntentContract.Constraint("protect_surroundings",
                         IntentContract.ConstraintKind.HARD,
-                        "Navigation must not clear unrelated terrain to reach a build cell",
+                        ExecutorMessages.text("build.terrain"),
                         "navigation")));
     }
 
     @Override
+    protected String cancelledMessage() { return ExecutorMessages.text("task.cancelled"); }
+
+    @Override
     protected String successMessage() {
-        if (!recordValid) return "Build rejected: " + recordValidationError;
-        return record.mode + " " + completedCount + " blocks of " + record.blockType;
+        if (!recordValid) return ExecutorMessages.text("build.rejected", String.valueOf(recordValidationError));
+        return ExecutorMessages.text("build.success", String.valueOf(record.mode), completedCount, String.valueOf(record.blockType));
     }
 
     @Override
     protected String timeoutMessage() {
-        if (!recordValid) return "Build rejected: " + recordValidationError;
-        return "Build timed out after " + completedCount + "/" + record.positions.length
-                + " positions (" + record.mode + ")";
+        if (!recordValid) return ExecutorMessages.text("build.rejected", String.valueOf(recordValidationError));
+        return ExecutorMessages.text("build.timeout", completedCount, record.positions.length, String.valueOf(record.mode));
     }
 
     @Override
     protected String failureMessage() {
-        if (!recordValid) return "Build rejected: " + recordValidationError;
+        if (!recordValid) return ExecutorMessages.text("build.rejected", String.valueOf(recordValidationError));
         if (failReason != null) return failReason;
-        return "Build failed after " + completedCount + "/" + record.positions.length + " positions";
+        return ExecutorMessages.text("build.failure", completedCount, record.positions.length);
     }
 
     /** Validate the public task payload before any world/path access occurs. */
     private String validateRecord() {
-        if (record == null) return "Build task record is null";
+        if (record == null) return ExecutorMessages.text("build.null");
         if (!"place".equals(record.mode) && !"clear".equals(record.mode)) {
-            return "Build mode must be 'place' or 'clear'";
+            return ExecutorMessages.text("build.mode");
         }
         if ("place".equals(record.mode)
                 && (record.blockType == null || record.blockType.isBlank())) {
-            return "Place builds require a block type";
+            return ExecutorMessages.text("build.blockType");
         }
         if (record.positions == null || record.positions.length == 0) {
-            return "Build positions must be non-empty";
+            return ExecutorMessages.text("build.empty");
         }
-        if (record.positions.length > 512) return "Build positions exceed the 512-cell limit";
+        if (record.positions.length > 512) return ExecutorMessages.text("build.cap");
         var level = TaskContext.serverPlayer(player).serverLevel();
         for (int[] position : record.positions) {
             if (position == null || position.length != 3) {
-                return "Every build position must contain exactly three coordinates";
+                return ExecutorMessages.text("build.coordinates");
             }
             BlockPos pos = new BlockPos(position[0], position[1], position[2]);
             if (position[1] < level.getMinBuildHeight()
                     || position[1] >= level.getMaxBuildHeight()
                     || !level.getWorldBorder().isWithinBounds(pos)) {
-                return "Build position is outside the current world bounds";
+                return ExecutorMessages.text("build.bounds");
             }
         }
         return null;

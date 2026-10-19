@@ -1,6 +1,7 @@
 package com.mineagent.engine.task;
 
 import com.mineagent.api.entity.AgentPlayer;
+import com.mineagent.engine.i18n.ExecutorMessages;
 import com.mineagent.api.task.CompanionTask;
 import com.mineagent.api.task.TaskState;
 import com.mineagent.api.task.TaskSnapshot;
@@ -100,7 +101,7 @@ public class MineBlockTask extends CompanionTask<AutoMineTool.MineBlockTaskRecor
 
             @Override
             public void onNavigationFailed(String reason) {
-                lastNavigationFailure = "Navigation failed: " + reason;
+                lastNavigationFailure = ExecutorMessages.text("mine.navigation", String.valueOf(reason));
                 if (recordTargetFailure(currentTarget(), lastNavigationFailure)) return;
                 beginScan();
             }
@@ -132,12 +133,9 @@ public class MineBlockTask extends CompanionTask<AutoMineTool.MineBlockTaskRecor
         scanSession = null;
         if (targetBlocks.isEmpty()) {
             if (minedCount > 0) {
-                failReason = "Only mined " + minedCount + "/" + record.count
-                        + " blocks of '" + record.blockType
-                        + "' before no reachable targets remained";
+                failReason = ExecutorMessages.text("mine.partial", minedCount, record.count, String.valueOf(record.blockType));
             } else {
-                failReason = "No reachable blocks of type '" + record.blockType
-                        + "' found within radius " + record.radius
+                failReason = ExecutorMessages.text("mine.noTargets", String.valueOf(record.blockType), record.radius)
                         + (lastNavigationFailure == null ? ""
                         : "; last_navigation_failure=" + lastNavigationFailure);
             }
@@ -166,9 +164,8 @@ public class MineBlockTask extends CompanionTask<AutoMineTool.MineBlockTaskRecor
         observeNavigationProgress(gameTime);
         if (phase == Phase.NAVIGATE
                 && gameTime - lastProgressTick > NAVIGATION_STALL_TICKS) {
-            lastNavigationFailure = "Navigation produced no physical or path progress for "
-                    + (gameTime - lastProgressTick) + " ticks at player="
-                    + TaskContext.serverPlayer(player).blockPosition().toShortString();
+            lastNavigationFailure = ExecutorMessages.text("mine.stalled", gameTime - lastProgressTick,
+                    TaskContext.serverPlayer(player).blockPosition().toShortString());
             nav.cancel();
             if (!recordTargetFailure(currentTarget(), lastNavigationFailure)) beginScan();
         }
@@ -211,7 +208,7 @@ public class MineBlockTask extends CompanionTask<AutoMineTool.MineBlockTaskRecor
         if (activeBreakTarget == null) {
             int durability = BlockDigger.toolDurability(sp);
             if (durability != Integer.MAX_VALUE && durability <= 1) {
-                failReason = "No safe tool available (held durability: " + durability + ")";
+                failReason = ExecutorMessages.text("mine.noTool", durability);
                 phase = Phase.DONE;
                 return;
             }
@@ -219,8 +216,7 @@ public class MineBlockTask extends CompanionTask<AutoMineTool.MineBlockTaskRecor
                     BlockDigger.startBreakingDetailed(sp, target);
             if (!assessment.allowed()) {
                 if (!recordTargetFailure(target,
-                        "Could not start vanilla break at " + target.toShortString()
-                                + "; " + assessment.diagnostic())) advanceTarget();
+                        ExecutorMessages.text("mine.breakRejected", target.toShortString(), assessment.diagnostic()))) advanceTarget();
                 return;
             }
             digTimeoutTicks = BlockDigger.expectedBreakTicks(sp, target);
@@ -240,8 +236,7 @@ public class MineBlockTask extends CompanionTask<AutoMineTool.MineBlockTaskRecor
             BlockDigger.abortBreaking(sp, target);
             activeBreakTarget = null;
             if (!recordTargetFailure(target,
-                    "Vanilla break timed out at " + target.toShortString()
-                            + " after " + digTicks + " ticks")) advanceTarget();
+                    ExecutorMessages.text("mine.breakTimeout", target.toShortString(), digTicks))) advanceTarget();
         }
     }
 
@@ -250,8 +245,7 @@ public class MineBlockTask extends CompanionTask<AutoMineTool.MineBlockTaskRecor
         if (target != null) unreachableBlocks.add(target.immutable());
         consecutiveTargetFailures++;
         if (consecutiveTargetFailures < MAX_CONSECUTIVE_TARGET_FAILURES) return false;
-        failReason = "Mining stopped after " + consecutiveTargetFailures
-                + " consecutive unreachable targets; last_failure=" + reason;
+        failReason = ExecutorMessages.text("mine.stopped", consecutiveTargetFailures, String.valueOf(reason));
         phase = Phase.DONE;
         markProgress(TaskContext.serverPlayer(player).level().getGameTime());
         return true;
@@ -373,7 +367,7 @@ public class MineBlockTask extends CompanionTask<AutoMineTool.MineBlockTaskRecor
                     .append('/').append(digTimeoutTicks);
         }
         return TaskSnapshot.progress(stage,
-                phase == Phase.DONE ? "Mining finished" : "Mining " + record.blockType,
+                phase == Phase.DONE ? ExecutorMessages.text("mine.finished") : ExecutorMessages.text("mine.snapshot", String.valueOf(record.blockType)),
                 minedCount, record.count,
                 target == null ? null : target.getX(),
                 target == null ? null : target.getY(),
@@ -392,36 +386,37 @@ public class MineBlockTask extends CompanionTask<AutoMineTool.MineBlockTaskRecor
                 true, !treeMaterial, !treeMaterial, false,
                 treeMaterial ? 0 : 8, 12, treeMaterial ? 3 : 12,
                 IntentContract.CleanupMode.CONTEXTUAL);
-        return new IntentContract("Mine " + record.count + " blocks of " + record.blockType,
-                "The requested blocks disappear through vanilla breaking and are counted once",
+        return new IntentContract(ExecutorMessages.text("mine.goal", record.count, String.valueOf(record.blockType)),
+                ExecutorMessages.text("mine.criterion"),
                 null, null, null, policy, java.util.List.of(
                 new IntentContract.Constraint("target_material",
                         IntentContract.ConstraintKind.HARD,
-                        "Only requested blocks count as task output; other breaks are navigation obstacles",
+                        ExecutorMessages.text("mine.output"),
                         "mining"),
                 new IntentContract.Constraint("tree_topology",
                         treeMaterial ? IntentContract.ConstraintKind.HARD
                                 : IntentContract.ConstraintKind.PREFERENCE,
-                        treeMaterial ? "Do not pillar or bridge merely to chop this tree"
-                                : "Minimize non-target terrain changes",
+                        treeMaterial ? ExecutorMessages.text("mine.tree")
+                                : ExecutorMessages.text("mine.terrain"),
                         "navigation")));
     }
 
     @Override
+    protected String cancelledMessage() { return ExecutorMessages.text("task.cancelled"); }
+
+    @Override
     protected String successMessage() {
-        return "Mined " + minedCount + " blocks of " + record.blockType;
+        return ExecutorMessages.text("mine.success", minedCount, String.valueOf(record.blockType));
     }
 
     @Override
     protected String timeoutMessage() {
-        return "Mining timed out after mining " + minedCount + "/" + record.count
-                + " blocks of " + record.blockType;
+        return ExecutorMessages.text("mine.timeout", minedCount, record.count, String.valueOf(record.blockType));
     }
 
     @Override
     protected String failureMessage() {
         return failReason != null ? failReason
-                : "Mining failed after mining " + minedCount + "/" + record.count
-                + " blocks of " + record.blockType;
+                : ExecutorMessages.text("mine.failure", minedCount, record.count, String.valueOf(record.blockType));
     }
 }
