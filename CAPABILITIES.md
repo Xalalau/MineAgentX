@@ -47,7 +47,7 @@ Perception is structured server data, not screenshots delivered to a vision mode
 | `goto` | Navigate to horizontal coordinates, an exact position, an altitude, or a block's neighboring position. Pathfinding can dig, bridge, climb pillars, and use supported movement maneuvers subject to policy and resources. |
 | `auto_mine` | Find and mine a requested block type and quantity, navigating to targets and collecting drops where reachable. |
 | `build` | Place or clear a sequence of block coordinates. Each request uses one block type and accepts at most 512 positions. |
-| `construction` | Create and revise persisted coordinate designs, assess candidate sites, inspect material/effort estimates, and generate six orthographic PNG views. |
+| `construction` | Create and revise persisted coordinate designs, assess candidate sites, inspect material/effort estimates, generate six orthographic PNG views and request/poll optional configured local visual review. |
 | `execute_construction` | Execute a design revision through physical `build` tasks in bounded batches and reconcile observed block outcomes. Task admission alone is not completion. |
 | `interact_at` | Use or attack a block, or use the offhand, optionally selecting an item and interaction duration. |
 | `interact_entity` | Use or attack an entity, including offhand use. |
@@ -56,7 +56,7 @@ Perception is structured server data, not screenshots delivered to a vision mode
 
 Construction navigates to valid placement positions, checks reach and line of sight, uses the Minecraft item-on-block interaction, and verifies resulting block state. It is not arbitrary long-distance world editing. Creative construction may use temporary block items; Survival and Adventure remain constrained by inventory and permissions.
 
-The versioned design/preview/revision subsystem is implemented and registered, with standalone regression coverage. Previews are colored voxels rather than Minecraft textures or special block geometry. Automatic terminal-event reconciliation and optional local visual-model review still require final integration; no live construction or visual inference is claimed. Projects currently use owner + exact companion name for storage; renaming requires a storage migration.
+The versioned design/preview/revision subsystem is implemented and registered. Previews are colored voxels rather than Minecraft textures or special block geometry. `review` starts optional bounded background inference and `review_status` polls it; only current-revision/current-configuration advisory evidence is published on the server thread. A review cannot authorize excavation or prove construction quality. Actual terminal callbacks reconcile the exact dispatched coordinates independently of task-ledger retention, including failed/cancelled work; scheduler SUCCESS alone is not a verified structure. Projects use owner + exact companion name. Rename refuses existing or unknown construction namespaces rather than silently losing state or inventing a migration. Integrated regression/HTTP-fixture coverage is not live construction or real visual-model validation.
 
 ### Inventory and item use
 
@@ -138,8 +138,8 @@ These mechanisms reduce latency for immediate reactions but are not guarantees o
 - Recover journal/projection/checkpoint state and quarantine corrupt memory files.
 - Investigate unfamiliar mechanisms with bounded budgets, risk assessment, hypotheses, counterexamples, and compensation rules.
 - Require independent evidence before promoting discovered rules into reusable skills; invalidate contradicted or environment-stale rules.
-- Track action transactions and callbacks to avoid duplicate or unsupported success reports.
-- Maintain evidence-backed evolving preferences, goals and world knowledge with bounded reflection and persistence. Legacy persona data/accessors remain compatible, but randomly assigned persona and canned idle dialogue no longer drive the decision context. Actual model-driven behavior and cancellation-safe late evidence remain under integration.
+- Track action transactions and callbacks to avoid duplicate or unsupported success reports. Typed skill uncertainty, cancellation and deadlines do not train physical failure counters, automatically retry or advance steps; late physical receipts remain observations rather than retroactive success.
+- Maintain evidence-backed evolving preferences, goals and world knowledge with bounded reflection and persistence. Legacy persona data/accessors remain compatible, but randomly assigned persona and canned idle dialogue no longer drive the decision context. Reflection reads the current server interval dynamically: `reflection.intervalTicks` defaults to 1200 game ticks, zero disables it, and positive values are bounded to 200–72000. Reload applies to existing loops; opportunities remain evidence-gated and bounded. Cancellation-safe outcome writers have regression coverage; actual model-driven behavior still requires live validation.
 
 ## 4. Multiple companions
 
@@ -193,6 +193,10 @@ MineAgentX supports two local inference backends: **native Ollama** and **Bonsai
 - Automatic/default reasoning behavior preserves the server's template policy. New inputs accept blank/`auto`, not explicit cloud-style budgets. Restoring supported local saves migrates recognized legacy effort values to `auto` with a diagnostic; unsupported adapters and saved endpoints are not silently remapped.
 - Request defaults, provider transport, and agent reasoning rounds share a 180-second local inference deadline. Explicit request deadlines remain supported; cancellation and current-task checks still apply. Output limits and actual model compatibility must be validated before claiming it works in-world.
 
+### Optional local visual review
+
+Configure `vision.enabled`, `vision.provider` (`ollama` or `openai-compatible`), `vision.model` and `vision.baseUrl` explicitly; `vision.apiKey` is optional. The selected local model must actually support images. No model is selected/downloaded automatically, and disabled vision does not disable design or physical execution. Requests carry six bounded inline PNGs through the supported local protocols, use bounded workers/queue and a maximum 180-second deadline, and publish advisory evidence only when polled with the matching current revision/configuration. HTTP fixtures verify transport, authentication and language, not a real model's architectural judgment.
+
 No cloud-provider integrations are part of this fork's supported connection surface. A documented alias or endpoint is not proof that the service is currently running. A protocol regression test against a local test server is not a real Bonsai quality evaluation.
 
 ## 7. Built-in instructional knowledge
@@ -223,7 +227,7 @@ All commands use `/mineagent`:
 | `tp` | Teleport the human player to the companion, not the other way around. |
 | `setskin <playername\|default\|steve\|alex>` | Apply or reset a skin. |
 | `resetskin` | Restore the default skin. |
-| `rename <name>` | Rename the companion. |
+| `rename <name>` | Rename the companion when no existing/unknown construction namespace would be forked; construction-storage migration is not implicit. |
 | `seteffort [name] <auto>` | Keep the local server in control of reasoning/template policy; explicit cloud-style effort levels are not supported. |
 
 ## 9. Platform, limits, and future direction
@@ -235,7 +239,7 @@ All commands use `/mineagent`:
 - Configuration/persistence can contain plaintext credentials if supplied; do not commit actual runtime configuration, keys, private chat, or worlds.
 - Existing server-backed locators expose knowledge beyond a human player's direct observations.
 - Legacy personality/emotion classes still exist for compatibility; evidence-backed identity replaces assigned personality in decision context. This is not a claim that every inherited class has been removed.
-- Persistent coordinate designs, six-view previews, world transforms and physical construction dispatch are implemented; live-world behavior, optional visual review and complete lifecycle integration still require verification.
+- Persistent coordinate designs, six-view previews, world transforms, physical construction dispatch, terminal reconciliation and optional local visual review have integrated regression coverage. Live-world/protection-mod behavior and real visual-model capability or judgment remain unverified.
 - Configurable EN/PT-BR is being integrated. Autonomous home/bed decisions and task-specific gameplay reliability still require model/gameplay validation.
 - The mod remains alpha software. Back up worlds and test on a disposable copy before using a valued world.
 
