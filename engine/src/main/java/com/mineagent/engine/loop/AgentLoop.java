@@ -226,6 +226,8 @@ public class AgentLoop {
     private final ExecutionOwner executionOwner = new ExecutionOwner(System::nanoTime,
             task -> Services.platform().scheduleOnServer(task));
     private volatile ExecutionOwner.Lease activeSkillLease;
+    /** Pending/running native admissions, including the gap before a body task is published. */
+    private final ConcurrentMap<String, ToolExecution> idleExecutionBlockers = new ConcurrentHashMap<>();
     private final Set<String> exposedExtraTools = ConcurrentHashMap.newKeySet();
     private record PendingSkillAction(String description,
                                       ChatMessage.ToolCallRef call) {}
@@ -288,6 +290,9 @@ public class AgentLoop {
     // ── Cognitive subsystems ──
     private final PersonaProfile persona;
     private final EvolvingIdentity identity = new EvolvingIdentity();
+    private final IdentityDeliberationGate identityDeliberationGate = new IdentityDeliberationGate();
+    private volatile EvolvingIdentity.Entry idleIdentityGoal;
+    private volatile long idleIdentityGeneration;
     private final IdentityReflection identityReflection = new IdentityReflection(identity,
             () -> MineAgentEngine.getConfig().reflection().intervalTicks());
     private final IdentityMemoryAccess identityMemoryAccess = new IdentityMemoryAccess(identity, identityReflection, eventGeneration::get);
@@ -527,7 +532,8 @@ public class AgentLoop {
     private static boolean reasonAlreadyRecorded(String reason) {
         return "owner_message".equals(reason) || "body_log".equals(reason)
                 || "cognition_decision".equals(reason) || "team_event".equals(reason)
-                || "rolling_replan".equals(reason) || "goal_verified".equals(reason);
+                || "rolling_replan".equals(reason) || "goal_verified".equals(reason)
+                || "identity_goal".equals(reason);
     }
 
     private static boolean shouldInterruptActiveCall(String reason) {
@@ -737,7 +743,7 @@ public class AgentLoop {
                 && skillRuntime.ownsAction(taskId);
         if (skillExecution != null && (!ownedSkillTask || state == TaskState.CANCELLED)) {
             // A real receipt remains useful, but cannot revive an obsolete skill or teach its outcome.
-            skillExecution.lease().release();
+            releaseExecution(skillExecution);
             dispatchedActionTools.remove(taskId);
             actionLedger.finish(taskId, ownedSkillTask ? ActionTransactionLedger.Status.CANCELLED
                             : ActionTransactionLedger.Status.UNVERIFIED,
@@ -761,6 +767,7 @@ public class AgentLoop {
             return;
         }
         executionOwner.release(taskId);
+        idleExecutionBlockers.remove(taskId);
         // A terminal task no longer owns the body. Keep its outcome as compact
         // evidence, but publish a null task id so the next decision sees an
         // idle executor instead of treating SUCCESS/FAILED as body occupancy.
@@ -889,6 +896,8 @@ public class AgentLoop {
             if (deliberation != null && enqueueInbox(deliberation)) {
                 wake(goalVerified ? "goal_verified"
                         : replan != null ? "rolling_replan" : "cognition_decision");
+            } else if (deliberation == null) {
+                wakeIdleIdentityGoal(gameTick);
             }
         } catch (Throwable failure) {
             // Entity teardown can race the final engine tick. Cognitive
@@ -896,6 +905,47 @@ public class AgentLoop {
             System.err.println("[MineAgent] Realtime cognition failed for "
                     + companion.companionName() + ": " + failure.getMessage());
         }
+    }
+
+    private void wakeIdleIdentityGoal(long gameTick) {
+        // Completion callbacks can wake the loop while holding the skill monitor.
+        // Inspect it before taking either the loop monitor or native admission gate.
+        if (identityIdleWorkOwned()) return;
+        synchronized (this) {
+            executionOwner.invalidate(() -> {
+                synchronized (inboxLock) {
+                    if (!inbox.isEmpty() || executor.isShutdown()) return;
+                }
+                if (!companion.isAlive()) return;
+                EvolvingIdentity.State state = identity.exportState();
+                var opportunity = identityDeliberationGate.admit(gameTick, state,
+                        liveBodyState.get().taskId() != null || nativeIdleWorkOwned(), suspended, inProgress);
+                if (opportunity == null) return;
+                idleIdentityGoal = state.entries().stream().filter(entry -> entry.kind().equals("goal")
+                        && entry.subject().equals(opportunity.subject()) && entry.revision() == opportunity.revision())
+                        .findFirst().orElseThrow();
+                wake("identity_goal");
+            });
+        }
+    }
+
+    private boolean nativeIdleWorkOwned() {
+        idleExecutionBlockers.values().removeIf(execution -> !execution.lease().active());
+        return !idleExecutionBlockers.isEmpty();
+    }
+
+    private boolean identityIdleWorkOwned() {
+        return liveBodyState.get().taskId() != null || skillRuntime.active()
+                || realtimeCognition.currentDecision().localControlRequired()
+                || nativeIdleWorkOwned()
+                || mechanismExplorer.all().stream().anyMatch(experiment -> !experiment.terminal());
+    }
+
+    private boolean idleIdentityCurrent() {
+        EvolvingIdentity.Entry goal = idleIdentityGoal;
+        return goal == null || (!suspended && companion.isAlive()
+                && eventGeneration.get() == idleIdentityGeneration
+                && !identityIdleWorkOwned() && identity.entries().contains(goal));
     }
 
     private static SituationSnapshot.TaskObservation toTaskObservation(LiveBodyState body) {
@@ -1338,9 +1388,11 @@ public class AgentLoop {
 
     private void startTurn(String trigger) {
         inProgress = true;
+        if ("identity_goal".equals(trigger)) idleIdentityGeneration = eventGeneration.get();
         try {
             executor.submit(() -> {
                 try {
+                    if (!idleIdentityCurrent()) return;
                     // Rate-limited memory auto-save (max once per minute
                     // internally). Runs on the loop executor thread — NOT the
                     // server thread — so file IO never causes game lag.
@@ -1354,6 +1406,7 @@ public class AgentLoop {
                     e.printStackTrace();
                 } finally {
                     synchronized (this) {
+                        idleIdentityGoal = null;
                         identityReflection.close();
                         inProgress = false;
                         // Check if inbox accumulated during this turn. While
@@ -1384,6 +1437,7 @@ public class AgentLoop {
             // to avoid permanently locking the loop (inProgress stuck true →
             // all future wake() calls queue into inbox and never execute).
             synchronized (this) {
+                idleIdentityGoal = null;
                 inProgress = false;
             }
             System.err.println("[MineAgent] Turn rejected by executor (shutting down?): "
@@ -2007,7 +2061,8 @@ public class AgentLoop {
                 long requestStarted = System.nanoTime();
                 Thread requestThread = Thread.currentThread();
                 activeLLMCallThread.set(requestThread);
-                if (eventGeneration.get() != callGeneration) {
+                if (eventGeneration.get() != callGeneration
+                        || (roundNumber == 0 && !idleIdentityCurrent())) {
                     activeLLMCallThread.compareAndSet(requestThread, null);
                     return null;
                 }
@@ -2038,7 +2093,8 @@ public class AgentLoop {
                 // Stale Request check: if a significant event arrived during
                 // the LLM call, discard the response. The situation it was
                 // generated for no longer applies.
-                if (eventGeneration.get() != callGeneration) {
+                if (eventGeneration.get() != callGeneration
+                        || (roundNumber == 0 && !idleIdentityCurrent())) {
                     // A discarded response must never become the parent of a
                     // later stateful request.  Provider implementations update
                     // their session as soon as HTTP parsing succeeds, so roll
@@ -2647,6 +2703,8 @@ public class AgentLoop {
                 });
         ToolExecution execution = new ToolExecution(id, tool.name(), lease, new AtomicBoolean());
         holder.set(execution);
+        idleExecutionBlockers.values().removeIf(previous -> !previous.lease().active());
+        idleExecutionBlockers.put(id, execution);
         return execution;
     }
 
@@ -2687,7 +2745,7 @@ public class AgentLoop {
                         raw, semanticWorldModel, currentGameTickSafe());
             }
             dispatchedActionTools.remove(execution.id());
-            execution.lease().release();
+            releaseExecution(execution);
             cognitiveState.append("unverified_tool_receipt", execution.id(), raw, currentGameTickSafe());
             mechanismExplorer.onToolResult(execution.id(), execution.name(), false, false, raw, currentGameTickSafe());
             return;
@@ -2707,12 +2765,12 @@ public class AgentLoop {
                     && (IDENTITY_OBSERVATION_TOOLS.contains(execution.name()) || SKILL_ACTION_TOOLS.contains(execution.name()))) {
                 identity.recordEvidence("observation", "tool:" + execution.name(), raw, tick);
             }
-            execution.lease().release();
+            releaseExecution(execution);
         } else if (SKILL_ACTION_TOOLS.contains(execution.name())) {
             actionLedger.markPending(execution.id(), semanticWorldModel, tick, raw);
         }
         // execute_skill has its own exact run lease, retained until the skill terminal event.
-        if (async && "execute_skill".equals(execution.name())) execution.lease().release();
+        if (async && "execute_skill".equals(execution.name())) releaseExecution(execution);
         execution.verified().set(success);
         mechanismExplorer.onToolResult(execution.id(), execution.name(), success, async, raw, tick);
     }
@@ -2738,7 +2796,12 @@ public class AgentLoop {
             }
         }
         dispatchedActionTools.remove(execution.id());
+        releaseExecution(execution);
+    }
+
+    private void releaseExecution(ToolExecution execution) {
         execution.lease().release();
+        idleExecutionBlockers.remove(execution.id(), execution);
     }
 
     private void expireExecution(ToolExecution execution, String payload) {
@@ -3185,6 +3248,11 @@ public class AgentLoop {
         sb.append(TeamBlackboard.summarize(companion.ownerUuid(),
                 companion.companionId(), liveAssetGameTick.get()));
         sb.append(identity.decisionContext(memoryQuery, RuntimeLanguage.language().id(), 1_200));
+        EvolvingIdentity.Entry idleGoal = idleIdentityGoal;
+        if (idleGoal != null) {
+            sb.append(IdentityIdleContext.render(
+                    identity.exportState(), idleGoal.subject(), RuntimeLanguage.language().id()));
+        }
         sb.append(identityReflection.context(RuntimeLanguage.language().id(), 1_200));
         // Retrieve locations against the newest objective, not merely by
         // global importance. This prevents unrelated old POIs from crowding
