@@ -263,7 +263,7 @@ public final class ConstructionChecks {
         var root = java.nio.file.Path.of("").toAbsolutePath();
         if (!java.nio.file.Files.isRegularFile(root.resolve("AGENTS.md"))
                 && root.getParent() != null && java.nio.file.Files.isRegularFile(root.getParent().resolve("AGENTS.md"))) root = root.getParent();
-        var directory = root.resolve(".tools/construction-work");
+        var directory = root.resolve(System.getProperty("mineagent.constructionWork", ".tools/construction-work"));
         java.nio.file.Files.createDirectories(directory); return directory;
     }
     public static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }

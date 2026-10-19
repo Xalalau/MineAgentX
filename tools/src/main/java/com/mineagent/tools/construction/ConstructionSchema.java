@@ -21,7 +21,7 @@ final class ConstructionSchema {
                         object(Map.of("position", point(0, 63), "block", string(128)), "position", "block"))),
                 "id", "dimension", "origin", "quarterTurns", "size", "decisions", "cells");
         var properties = new LinkedHashMap<String, Object>();
-        properties.put("mode", Map.of("type", "string", "enum", List.of("help", "list", "read", "revise", "assess", "preview", "observe", "evidence"),
+        properties.put("mode", Map.of("type", "string", "enum", List.of("help", "list", "read", "revise", "assess", "preview", "review", "review_status", "observe", "evidence"),
                 "description", ConstructionText.text(l, "schema_mode")));
         properties.put("id", string(48)); properties.put("revision", integer(0, 128));
         properties.put("expected_revision", integer(0, 128)); properties.put("reason", string(1024));

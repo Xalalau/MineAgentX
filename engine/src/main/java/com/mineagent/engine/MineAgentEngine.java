@@ -1467,6 +1467,9 @@ public final class MineAgentEngine {
             }
         }
 
+        if (!com.mineagent.engine.construction.MinecraftConstructionBridge
+                .canRename(state.companion, newName)) return false;
+
         String oldName = state.companion.companionName();
         var sp = state.companion.serverPlayer();
 

@@ -231,6 +231,8 @@ public class AgentLoop {
     /** Correlates executor task IDs with tool names for semantic outcomes. */
     private final ConcurrentMap<String, String> dispatchedActionTools =
             new ConcurrentHashMap<>();
+    /** Retain exact async skill authority until its scheduler terminal receipt, even after revocation. */
+    private final ConcurrentMap<String, ToolExecution> skillTaskExecutions = new ConcurrentHashMap<>();
     /** Verified action prefix for learning one reusable multi-step episode. */
     private final Object verifiedTraceLock = new Object();
     private final List<ChatMessage.ToolCallRef> verifiedActionTrace = new ArrayList<>();
@@ -283,7 +285,8 @@ public class AgentLoop {
     // ── Cognitive subsystems ──
     private final PersonaProfile persona;
     private final EvolvingIdentity identity = new EvolvingIdentity();
-    private final IdentityReflection identityReflection = new IdentityReflection(identity);
+    private final IdentityReflection identityReflection = new IdentityReflection(identity,
+            () -> MineAgentEngine.getConfig().reflection().intervalTicks());
     private final IdentityMemoryAccess identityMemoryAccess = new IdentityMemoryAccess(identity, identityReflection, eventGeneration::get);
     private final EmotionState emotion;
     private final PlaceEventMemory placeMemory;
@@ -718,6 +721,44 @@ public class AgentLoop {
                                IntentContract intent, TaskState state,
                                TaskSnapshot snapshot, String message,
                                long gameTick) {
+        // Reconcile physical receipts even when revoked skill authority rejects learning below.
+        if ("execute_construction".equals(dispatchedActionTools.get(taskId))) {
+            try {
+                com.mineagent.engine.construction.MinecraftConstructionBridge.open(companion)
+                        .taskFinished(taskId, state.name());
+            } catch (java.io.IOException | RuntimeException failure) {
+                System.err.println("[MineAgent] Construction reconciliation failed: "
+                        + failure.getClass().getSimpleName());
+            }
+        }
+        ToolExecution skillExecution = skillTaskExecutions.remove(taskId);
+        boolean ownedSkillTask = skillExecution != null && skillExecution.lease().active()
+                && skillRuntime.ownsAction(taskId);
+        if (skillExecution != null && (!ownedSkillTask || state == TaskState.CANCELLED)) {
+            // A real receipt remains useful, but cannot revive an obsolete skill or teach its outcome.
+            skillExecution.lease().release();
+            dispatchedActionTools.remove(taskId);
+            actionLedger.finish(taskId, ownedSkillTask ? ActionTransactionLedger.Status.CANCELLED
+                            : ActionTransactionLedger.Status.UNVERIFIED,
+                    message, semanticWorldModel, gameTick);
+            semanticWorldModel.observe("task:" + taskId, "status", ownedSkillTask ? "cancelled" : "unverified",
+                    null, 1.0, "scheduler", taskId, gameTick, 2_400L, false);
+            cognitiveState.append("unverified_task_receipt", taskId, state + ":" + message, gameTick);
+            enqueueInbox(text("Unverified task receipt; observe current state before repeating work: ",
+                    "Recibo de tarefa não verificado; observe o estado atual antes de repetir o trabalho: ")
+                    + taskId + " state=" + state + " " + message);
+            if (ownedSkillTask) {
+                LiveBodyState previous = liveBodyState.get();
+                if (previous != null && Objects.equals(previous.taskId(), taskId)) {
+                    liveBodyState.compareAndSet(previous, new LiveBodyState(null, "idle", null, null,
+                            "last_task=" + taskName + " state=" + state, gameTick));
+                }
+                mechanismExplorer.onTaskFinished(taskId, state, message, gameTick);
+                skillRuntime.onTaskFinished(taskId, state, message, gameTick);
+            }
+            publishWorldSnapshot(gameTick, true);
+            return;
+        }
         executionOwner.release(taskId);
         // A terminal task no longer owns the body. Keep its outcome as compact
         // evidence, but publish a null task id so the next decision sees an
@@ -1166,7 +1207,8 @@ public class AgentLoop {
         ExecutionOwner.Lease skillLease = activeSkillLease;
         boolean ownedSkillAction = skillRuntime.ownsAction(actionId);
         if (suspended || (ownedSkillAction && (skillLease == null || !skillLease.active()))) {
-            return new SkillRuntime.DispatchResult(false, tool.dispatchesAsyncTask(), false, executionUnavailable());
+            return new SkillRuntime.DispatchResult(false, tool.dispatchesAsyncTask(), false, executionUnavailable(),
+                    SkillRuntime.Disposition.CANCELLED);
         }
         LiveBodyState body = liveBodyState.get();
         if (tool.dispatchesAsyncTask() && body != null && body.taskId() != null) {
@@ -1175,6 +1217,7 @@ public class AgentLoop {
         }
         ToolExecution execution = prepareExecution(actionId, tool, eventGeneration.get(),
                 () -> !ownedSkillAction || (skillLease != null && skillLease.active()));
+        if (ownedSkillAction && tool.dispatchesAsyncTask()) skillTaskExecutions.put(actionId, execution);
         dispatchExecution(execution, tool, arguments);
         // SkillRuntime's dispatcher is deliberately immediate. A tool that defers its admission
         // callback is revoked here; its eventual real-world receipt is reconciled separately.
@@ -1186,8 +1229,11 @@ public class AgentLoop {
         String raw = execution.call().terminal().payload();
         boolean completed = execution.call().terminal().state() == ExecutionProtocol.State.COMPLETED;
         boolean asynchronous = completed && "async_pending".equals(analyzeFailure(raw).errorType());
+        // Definitive non-admission has no future scheduler receipt to release retained authority.
+        if (completed && !asynchronous) skillTaskExecutions.remove(actionId, execution);
         boolean success = completed && execution.verified().get();
-        return new SkillRuntime.DispatchResult(success, asynchronous, success, raw);
+        return completed ? new SkillRuntime.DispatchResult(success, asynchronous, success, raw)
+                : new SkillRuntime.DispatchResult(false, false, false, raw, SkillRuntime.Disposition.UNVERIFIED);
     }
 
     /** Revocation is immediate; exact task cleanup always executes later on the server. */
@@ -1250,11 +1296,15 @@ public class AgentLoop {
         semanticWorldModel.observe("skill:" + snapshot.runId(), "status",
                 snapshot.status().name().toLowerCase(Locale.ROOT), null, 1.0,
                 "skill_runtime", snapshot.runId(), gameTick, 2_400L, false);
-        semanticWorldModel.recordOutcome("execute_skill", success,
-                snapshot.skillName() + ": " + snapshot.lastEvidence(),
-                snapshot.runId(), gameTick, true);
-        mechanismExplorer.onAdapterOutcome(snapshot.skillName(), success,
-                snapshot.lastEvidence(), gameTick);
+        if (snapshot.disposition().learnable()) {
+            semanticWorldModel.recordOutcome("execute_skill", success,
+                    snapshot.skillName() + ": " + snapshot.lastEvidence(),
+                    snapshot.runId(), gameTick, true);
+            if (snapshot.failureKind() == SkillRuntime.FailureKind.POSTCONDITION) {
+                // The adapter API consumes a stable technical reason, never quoted/localized evidence.
+                mechanismExplorer.onAdapterOutcome(snapshot.skillName(), success, "postcondition", gameTick);
+            }
+        }
         onBodyLog("[SKILL_FINISHED] run_id=" + snapshot.runId()
                 + " skill=" + snapshot.skillName() + " state=" + snapshot.status()
                 + " evidence=" + snapshot.lastEvidence());
@@ -2639,6 +2689,19 @@ public class AgentLoop {
     private void publishToolOutcome(ToolExecution execution, String raw) {
         publishWorldSnapshotNow(true);
         FailureAnalysis outcome = analyzeFailure(raw);
+        if ("execution_unverified".equals(outcome.errorType())) {
+            // A callback can truthfully report revocation after partial physical work.
+            // Completion of its transport is not verification of the requested action.
+            if (SKILL_ACTION_TOOLS.contains(execution.name())) {
+                actionLedger.finish(execution.id(), ActionTransactionLedger.Status.UNVERIFIED,
+                        raw, semanticWorldModel, currentGameTickSafe());
+            }
+            dispatchedActionTools.remove(execution.id());
+            execution.lease().release();
+            cognitiveState.append("unverified_tool_receipt", execution.id(), raw, currentGameTickSafe());
+            mechanismExplorer.onToolResult(execution.id(), execution.name(), false, false, raw, currentGameTickSafe());
+            return;
+        }
         boolean async = "async_pending".equals(outcome.errorType());
         boolean success = async || outcome.isSuccess();
         long tick = currentGameTickSafe();

@@ -34,6 +34,13 @@ public final class SkillRuntime {
     }
 
     public enum FailurePolicy { REPLAN, RETRY_ONCE, ABORT }
+    public enum FailureKind { NONE, ACTION, POSTCONDITION }
+
+    /** Authority is structural metadata, never inferred from evidence or player prose. */
+    public enum Disposition {
+        VERIFIED, UNVERIFIED, CANCELLED;
+        public boolean learnable() { return this == VERIFIED; }
+    }
 
     public record Condition(String subject, String predicate, String value,
                             double minimumConfidence) {
@@ -62,8 +69,29 @@ public final class SkillRuntime {
     }
 
     public record DispatchResult(boolean accepted, boolean asynchronous,
-                                 boolean success, String evidence) {
+                                 boolean success, String evidence, Disposition disposition) {
+        /** Legacy protocol codes remain compatible; ordinary evidence is authoritative, not parsed as prose. */
+        public DispatchResult(boolean accepted, boolean asynchronous, boolean success, String evidence) {
+            this(accepted, asynchronous, success, evidence, legacyDisposition(evidence));
+        }
+        private static Disposition legacyDisposition(String evidence) {
+            try {
+                JsonElement value = JsonParser.parseString(evidence);
+                JsonElement code = value.isJsonObject() ? value.getAsJsonObject().get("code") : null;
+                if (code != null && code.isJsonPrimitive() && code.getAsJsonPrimitive().isString()) {
+                    return switch (code.getAsString()) {
+                        case "tool_cancelled" -> Disposition.CANCELLED;
+                        case "tool_timeout" -> Disposition.UNVERIFIED;
+                        default -> Disposition.VERIFIED;
+                    };
+                }
+            } catch (RuntimeException notStructured) {
+                // Only exact top-level protocol fields carry authority metadata.
+            }
+            return Disposition.VERIFIED;
+        }
         public DispatchResult {
+            disposition = Objects.requireNonNull(disposition, "disposition");
             evidence = normalize(evidence, success ? "accepted" : ContextMessages.text("skill.dispatchFailure"));
         }
     }
@@ -73,7 +101,21 @@ public final class SkillRuntime {
     public record Snapshot(String runId, String skillName, Status status,
                            int stepIndex, int stepCount, int attempt,
                            String activeTool, String lastEvidence,
-                           long startedTick, long updatedTick) {
+                           long startedTick, long updatedTick, Disposition disposition,
+                           FailureKind failureKind) {
+        public Snapshot(String runId, String skillName, Status status, int stepIndex,
+                        int stepCount, int attempt, String activeTool, String lastEvidence,
+                        long startedTick, long updatedTick, Disposition disposition) {
+            this(runId, skillName, status, stepIndex, stepCount, attempt, activeTool,
+                    lastEvidence, startedTick, updatedTick, disposition, FailureKind.NONE);
+        }
+        public Snapshot(String runId, String skillName, Status status, int stepIndex,
+                        int stepCount, int attempt, String activeTool, String lastEvidence,
+                        long startedTick, long updatedTick) {
+            this(runId, skillName, status, stepIndex, stepCount, attempt, activeTool,
+                    lastEvidence, startedTick, updatedTick,
+                    status == Status.CANCELLED ? Disposition.CANCELLED : Disposition.VERIFIED);
+        }
         public boolean terminal() {
             return status == Status.SUCCEEDED || status == Status.NEEDS_REPLAN
                     || status == Status.FAILED || status == Status.CANCELLED;
@@ -113,6 +155,8 @@ public final class SkillRuntime {
     private String skillName;
     private List<Step> steps = List.of();
     private Status status = Status.IDLE;
+    private Disposition disposition = Disposition.UNVERIFIED;
+    private FailureKind failureKind = FailureKind.NONE;
     private int stepIndex;
     private int attempt;
     private String activeActionId;
@@ -158,6 +202,8 @@ public final class SkillRuntime {
         skillName = learned.name();
         steps = decoded;
         status = Status.RUNNING;
+        disposition = Disposition.UNVERIFIED;
+        failureKind = FailureKind.NONE;
         stepIndex = 0;
         attempt = 0;
         activeActionId = null;
@@ -181,13 +227,14 @@ public final class SkillRuntime {
 
         if (status == Status.WAITING_TASK && !taskPaused
                 && gameTick - stepStartedTick > step.timeoutTicks()) {
-            failStep(ContextMessages.text("skill.timeout", step.timeoutTicks()), gameTick);
+            terminal(Status.NEEDS_REPLAN, ContextMessages.text("skill.timeout", step.timeoutTicks()),
+                    gameTick, Disposition.UNVERIFIED);
             return;
         }
         if (status == Status.VERIFYING) {
             if (effectsVerified(step, gameTick)) completeStep(gameTick);
             else if (gameTick > verificationDeadlineTick) {
-                failStep(ContextMessages.text("skill.postcondition"), gameTick);
+                failStep(ContextMessages.text("skill.postcondition"), gameTick, FailureKind.POSTCONDITION);
             }
             return;
         }
@@ -204,15 +251,27 @@ public final class SkillRuntime {
         stepStartedTick = gameTick;
         worldRevisionAtDispatch = worldModel.revision();
         activeActionId = runId + ":" + stepIndex + ":" + attempt;
+        String dispatchedRun = runId;
+        String dispatchedAction = activeActionId;
+        // Arm exact-action callbacks before dispatch, which may complete synchronously.
+        status = Status.WAITING_TASK;
         DispatchResult result;
         try {
             result = dispatcher.dispatch(activeActionId, step.tool(),
                     step.arguments().deepCopy());
         } catch (Throwable failure) {
             result = new DispatchResult(false, false, false,
-                    failure.getClass().getSimpleName() + ": " + failure.getMessage());
+                    failure.getClass().getSimpleName() + ": " + failure.getMessage(), Disposition.UNVERIFIED);
         }
+        // Dispatch may synchronously revoke this run or let a completion sink start another.
+        if (status != Status.WAITING_TASK || !Objects.equals(runId, dispatchedRun)
+                || !Objects.equals(activeActionId, dispatchedAction)) return;
         lastEvidence = result.evidence();
+        if (!result.disposition().learnable()) {
+            terminal(result.disposition() == Disposition.CANCELLED ? Status.CANCELLED : Status.NEEDS_REPLAN,
+                    result.evidence(), gameTick, result.disposition());
+            return;
+        }
         if (!result.accepted() || !result.success()) {
             failStep(result.evidence(), gameTick);
         } else if (result.asynchronous()) {
@@ -245,12 +304,16 @@ public final class SkillRuntime {
     /** Accept only the terminal event for the exact internally dispatched step. */
     public synchronized boolean onTaskFinished(String taskId, TaskState taskState,
                                                String evidence, long gameTick) {
+        if (taskState != TaskState.SUCCESS && taskState != TaskState.FAILED
+                && taskState != TaskState.CANCELLED) return false;
         if (status != Status.WAITING_TASK || activeActionId == null
                 || !activeActionId.equals(taskId)) return false;
-        lastEvidence = normalize(evidence, taskState == null ? "unknown" : taskState.name());
+        lastEvidence = normalize(evidence, taskState.name());
         taskPaused = false;
         taskPausedAtTick = 0L;
-        if (taskState != TaskState.SUCCESS) {
+        if (taskState == TaskState.CANCELLED) {
+            terminal(Status.CANCELLED, lastEvidence, gameTick, Disposition.CANCELLED);
+        } else if (taskState != TaskState.SUCCESS) {
             failStep(lastEvidence, gameTick);
         } else if (steps.get(stepIndex).expectedEffects().isEmpty()) {
             completeStep(gameTick);
@@ -264,7 +327,7 @@ public final class SkillRuntime {
 
     public synchronized void cancel(String reason, long gameTick) {
         if (!active()) return;
-        terminal(Status.CANCELLED, normalize(reason, "cancelled"), gameTick);
+        terminal(Status.CANCELLED, normalize(reason, "cancelled"), gameTick, Disposition.CANCELLED);
     }
 
     public synchronized boolean active() {
@@ -281,7 +344,7 @@ public final class SkillRuntime {
                 ? steps.get(stepIndex).tool() : null;
         return new Snapshot(runId, skillName, status, stepIndex,
                 steps.size(), attempt, activeTool, lastEvidence,
-                startedTick, updatedTick);
+                startedTick, updatedTick, disposition, failureKind);
     }
 
     public synchronized String summarizeForPrompt() {
@@ -309,14 +372,19 @@ public final class SkillRuntime {
     }
 
     private void failStep(String evidence, long gameTick) {
+        failStep(evidence, gameTick, FailureKind.ACTION);
+    }
+
+    private void failStep(String evidence, long gameTick, FailureKind kind) {
+        failureKind = kind;
         Step step = steps.get(stepIndex);
         lastEvidence = normalize(evidence, ContextMessages.text("skill.stepFailed"));
         String actionToCancel = activeActionId;
         boolean cancelAsync = status == Status.WAITING_TASK;
-        activeActionId = null;
         updatedTick = Math.max(updatedTick, gameTick);
         if (step.failurePolicy() == FailurePolicy.RETRY_ONCE
                 && attempt < step.maxAttempts() && transientFailure(lastEvidence)) {
+            activeActionId = null;
             status = Status.RUNNING;
             if (cancelAsync) cancelDispatchedAction(actionToCancel);
             return;
@@ -324,20 +392,26 @@ public final class SkillRuntime {
         library.recordResult(skillName, false);
         Status terminal = step.failurePolicy() == FailurePolicy.ABORT
                 ? Status.FAILED : Status.NEEDS_REPLAN;
-        if (cancelAsync) cancelDispatchedAction(actionToCancel);
         terminal(terminal, ContextMessages.text("skill.step") + (stepIndex + 1) + " " + step.tool()
                 + ContextMessages.text("skill.failed") + lastEvidence, gameTick);
     }
 
     private void terminal(Status terminalStatus, String evidence, long gameTick) {
+        terminal(terminalStatus, evidence, gameTick, Disposition.VERIFIED);
+    }
+
+    private void terminal(Status terminalStatus, String evidence, long gameTick,
+                          Disposition terminalDisposition) {
+        disposition = terminalDisposition;
         String actionToCancel = activeActionId;
         boolean cancelAsync = status == Status.WAITING_TASK;
         status = terminalStatus;
         lastEvidence = normalize(evidence, terminalStatus.name());
         activeActionId = null;
         updatedTick = Math.max(updatedTick, gameTick);
+        Snapshot completed = snapshot();
         if (cancelAsync) cancelDispatchedAction(actionToCancel);
-        completionSink.completed(snapshot());
+        completionSink.completed(completed);
     }
 
     private void cancelDispatchedAction(String actionId) {
@@ -348,8 +422,9 @@ public final class SkillRuntime {
             // Cancellation is a safety cleanup. Never let a platform-specific
             // cancellation failure take down the server tick or hide the
             // already-recorded skill failure.
-            lastEvidence = normalize(lastEvidence + ContextMessages.text("skill.cancelFailure")
-                    + failure.getMessage(), lastEvidence);
+            // Cleanup can reenter and start a different run; never write into its evidence.
+            System.err.println("[MineAgent] " + actionId + ContextMessages.text("skill.cancelFailure")
+                    + failure.getMessage());
         }
     }
 

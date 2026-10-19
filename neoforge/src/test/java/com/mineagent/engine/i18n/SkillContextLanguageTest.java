@@ -33,21 +33,31 @@ class SkillContextLanguageTest {
         assertEquals(SkillRuntime.Status.NEEDS_REPLAN, runtime.snapshot().status());
     }
 
-    @Test void localizedTimeoutKeepsTheSameRetryBudgetAndTerminalState() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"en_us", "pt_br"})
+    void localizedTimeoutIsUnverifiedWithoutRetryOrLearning(String language) {
+        RuntimeLanguage.configure(language);
         var library = new SkillLibrary();
         library.register("raw_skill", "raw description", "raw trigger", "[{\"tool\":\"auto_mine\",\"args\":{},\"timeout_ticks\":20,\"on_failure\":\"retry_once\"}]", true);
+        var before = library.get("raw_skill").orElseThrow();
+        var dispatches = new java.util.concurrent.atomic.AtomicInteger();
         var runtime = new SkillRuntime(library, new SemanticWorldModel(),
-                (id, tool, args) -> new SkillRuntime.DispatchResult(true, true, true, "raw evidence"), ignored -> {});
-        RuntimeLanguage.configure("pt_br");
+                (id, tool, args) -> {
+                    dispatches.incrementAndGet();
+                    return new SkillRuntime.DispatchResult(true, true, true, "raw evidence");
+                }, ignored -> {});
         assertTrue(runtime.start("raw_skill", null, 1L).accepted());
         runtime.tick(2L);
         runtime.tick(23L);
-        assertEquals(SkillRuntime.Status.RUNNING, runtime.snapshot().status());
-        assertEquals("timeout: etapa excedeu o tempo limite de 20 ticks", runtime.snapshot().lastEvidence());
+        assertEquals(SkillRuntime.Status.NEEDS_REPLAN, runtime.snapshot().status());
+        assertEquals(SkillRuntime.Disposition.UNVERIFIED, runtime.snapshot().disposition());
+        assertEquals(ContextMessages.text("skill.timeout", 20), runtime.snapshot().lastEvidence());
         runtime.tick(24L);
         runtime.tick(45L);
         assertEquals(SkillRuntime.Status.NEEDS_REPLAN, runtime.snapshot().status());
-        assertEquals(2, runtime.snapshot().attempt());
+        assertEquals(1, runtime.snapshot().attempt());
+        assertEquals(1, dispatches.get(), "An expired action cannot be repeated without observing its outcome");
+        assertEquals(before, library.get("raw_skill").orElseThrow());
     }
 
     @Test void runtimeSummariesAndVerifiedEvidenceAreLocalizedWithoutChangingToolIds() {

@@ -52,7 +52,19 @@ public final class MinecraftConstructionBridge implements ConstructionExecution.
         Objects.requireNonNull(owner); Objects.requireNonNull(companionName);
         return owner + "_" + UUID.nameUUIDFromBytes(companionName.getBytes(StandardCharsets.UTF_8));
     }
-    /** Uses the same world data root as existing companion memory; identity survives recreated companion UUIDs. */
+    /** No persisted companion UUID exists in CompanionStore. Refuse ambiguous name-key changes, never guess a migration. */
+    public static boolean canRename(Path world, UUID owner, String oldName, String newName) {
+        if (world == null || owner == null || oldName == null || newName == null) return false;
+        if (oldName.equals(newName)) return true;
+        Path base = world.resolve("mineagent_construction");
+        // Existing empty namespaces also fail closed; they may contain interrupted or unreadable data.
+        return java.nio.file.Files.notExists(base.resolve(storageKey(owner, oldName)), java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                && java.nio.file.Files.notExists(base.resolve(storageKey(owner, newName)), java.nio.file.LinkOption.NOFOLLOW_LINKS);
+    }
+    public static boolean canRename(AgentPlayer player, String newName) {
+        return player != null && canRename(MineAgentEngine.getWorldDataDir(), player.ownerUuid(), player.companionName(), newName);
+    }
+    /** Uses the same world data root as existing companion memory; the exact owner/name key survives recreation, not rename. */
     public static ConstructionSession open(AgentPlayer player) throws IOException {
         Path world = MineAgentEngine.getWorldDataDir();
         if (world == null) throw new IOException("world_unavailable");

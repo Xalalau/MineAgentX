@@ -19,9 +19,15 @@ public final class ConstructionTool implements Tool {
     }
     private final SessionFactory sessions;
     private final PreviewSink previews;
+    private final java.util.function.Supplier<com.mineagent.api.config.MineAgentConfig.VisionConfig> vision;
     public ConstructionTool(SessionFactory sessions, PreviewSink previews) {
+        this(sessions, previews, () -> com.mineagent.engine.MineAgentEngine.getConfig().vision());
+    }
+    public ConstructionTool(SessionFactory sessions, PreviewSink previews,
+                            java.util.function.Supplier<com.mineagent.api.config.MineAgentConfig.VisionConfig> vision) {
         this.sessions = Objects.requireNonNull(sessions);
         this.previews = previews == null ? (p, r, v) -> false : previews;
+        this.vision = Objects.requireNonNull(vision);
     }
     @Override public String name() { return "construction"; }
     @Override public String description() { return description(RuntimeLanguage.language().id()); }
@@ -85,6 +91,11 @@ public final class ConstructionTool implements Tool {
                 result.addProperty("event_count", events.size());
                 if (offset < events.size()) result.add("event", ConstructionCodec.JSON.toJsonTree(events.get(offset)));
                 result.addProperty("next_offset", Math.min(offset + 1, events.size()));
+            }
+            case "review", "review_status" -> {
+                var review = ConstructionVisualReview.shared().request(repository, revision, vision.get(), locale,
+                        session.port() == null ? 0 : session.port().tick(), mode.equals("review"));
+                review.entrySet().forEach(e -> result.add(e.getKey(), e.getValue()));
             }
             case "preview" -> {
                 var views = new OrthographicRenderer().render(design);

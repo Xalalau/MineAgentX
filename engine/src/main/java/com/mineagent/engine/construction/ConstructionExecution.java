@@ -40,6 +40,17 @@ public final class ConstructionExecution {
         if (!port.dimension().equals(d.dimension())) return state("different_dimension");
         if (repository.read(d.id(), 0).version() != revision.version()) return state("stale_revision");
         if (reconcile(d.id())) return state("pending");
+        // Terminal callbacks carry task IDs, not a caller generation. Never reuse one in this live namespace.
+        String after = "";
+        while (true) {
+            var entries = repository.list(after, 20);
+            if (entries.isEmpty()) break;
+            for (var entry : entries) for (var event : repository.evidence(entry.id(), 0)) {
+                if (event.kind().equals("dispatch") && taskId.equals(event.payload().get("task_id").getAsString())
+                        && port.sessionId().equals(event.payload().get("session").getAsString())) return state("task_id_reused");
+            }
+            after = entries.getLast().id();
+        }
         var assessment = SiteAssessment.inspect(d, port, port.position(), port.tick(), port.inventory());
         JsonObject result = state("blocked_site"); result.add("assessment", JSON.toJsonTree(assessment));
         if (!assessment.executable()) return result;
@@ -93,33 +104,66 @@ public final class ConstructionExecution {
         result.addProperty("total", d.cells().size()); result.addProperty("unknown", unknown);
         return result;
     }
-    /** Lifecycle hook: invoke on server ticks or query. Never automatically dispatches more work. */
-    public boolean reconcile(String designId) throws IOException {
-        List<ConstructionRepository.Evidence> events = repository.evidence(designId, 0);
+    /** Server-thread terminal callback. The supplied actual terminal state survives task-ledger eviction. */
+    public boolean taskFinished(String taskId, String terminalState) throws IOException {
+        if (taskId == null || taskId.isBlank()) throw new IllegalArgumentException("task_id");
+        if (!Set.of("SUCCESS", "FAILED", "CANCELLED").contains(Objects.requireNonNull(terminalState)))
+            throw new IllegalArgumentException("terminal_state");
+        String after = "";
+        while (true) {
+            var entries = repository.list(after, 20);
+            if (entries.isEmpty()) return false;
+            for (var entry : entries) {
+                var events = repository.evidence(entry.id(), 0);
+                Set<Integer> closed = closed(events);
+                for (var event : events) {
+                    if (event.kind().equals("dispatch") && !closed.contains(event.sequence())
+                            && taskId.equals(event.payload().get("task_id").getAsString())
+                            && port.sessionId().equals(event.payload().get("session").getAsString())) {
+                        recordOutcome(entry.id(), event, terminalState);
+                        return true;
+                    }
+                }
+            }
+            after = entries.getLast().id();
+        }
+    }
+    private static Set<Integer> closed(List<ConstructionRepository.Evidence> events) {
         Set<Integer> closed = new HashSet<>();
         for (var e : events) if (e.kind().equals("outcome") && e.payload().has("dispatch_sequence"))
             closed.add(e.payload().get("dispatch_sequence").getAsInt());
+        return closed;
+    }
+    private void recordOutcome(String designId, ConstructionRepository.Evidence event, String status) throws IOException {
+        var revision = repository.read(designId, event.revision());
+        Batch batch = JSON.fromJson(event.payload().get("batch"), Batch.class);
+        boolean observable = revision.design().dimension().equals(port.dimension());
+        int matched = 0, unknown = 0;
+        for (Point p : batch.positions()) {
+            var o = observable ? port.observe(p) : null;
+            if (o == null) unknown++;
+            else if (batch.mode().equals("clear") ? o.air() : batch.block().equals(o.block())) matched++;
+        }
+        JsonObject outcome = new JsonObject(); outcome.addProperty("dispatch_sequence", event.sequence());
+        outcome.addProperty("task_id", event.payload().get("task_id").getAsString());
+        outcome.addProperty("task_state", status); outcome.addProperty("matched", matched);
+        outcome.addProperty("total", batch.positions().size()); outcome.addProperty("unknown", unknown);
+        repository.appendEvidence(designId, event.revision(), "outcome", port.tick(), outcome);
+    }
+    /** Lifecycle hook: invoke on server ticks or query. Never automatically dispatches more work. */
+    public boolean reconcile(String designId) throws IOException {
+        List<ConstructionRepository.Evidence> events = repository.evidence(designId, 0);
+        Set<Integer> closed = closed(events);
         boolean pending = false;
         for (var e : events) {
             if (!e.kind().equals("dispatch") || closed.contains(e.sequence())) continue;
-            var revision = repository.read(designId, e.revision());
-            if (!revision.design().dimension().equals(port.dimension())) { pending = true; continue; }
             var payload = e.payload(); String task = payload.get("task_id").getAsString();
             String status = port.taskState(task);
             boolean sameSession = port.sessionId().equals(payload.get("session").getAsString());
-            if (sameSession && (status == null || Set.of("PENDING", "RUNNING", "PAUSED").contains(status))) { pending = true; continue; }
-            Batch batch = JSON.fromJson(payload.get("batch"), Batch.class);
-            int matched = 0, unknown = 0;
-            for (Point p : batch.positions()) {
-                var o = port.observe(p);
-                if (o == null) unknown++;
-                else if (batch.mode().equals("clear") ? o.air() : batch.block().equals(o.block())) matched++;
+            if (sameSession && (status == null || !Set.of("SUCCESS", "FAILED", "CANCELLED").contains(status))) {
+                pending = true; continue;
             }
-            JsonObject outcome = new JsonObject(); outcome.addProperty("dispatch_sequence", e.sequence());
-            outcome.addProperty("task_id", task); outcome.addProperty("task_state", sameSession ? status : "interrupted_restart");
-            outcome.addProperty("matched", matched); outcome.addProperty("total", batch.positions().size());
-            outcome.addProperty("unknown", unknown);
-            repository.appendEvidence(designId, e.revision(), "outcome", port.tick(), outcome);
+            recordOutcome(designId, e, sameSession ? status : "interrupted_restart");
         }
         return pending;
     }

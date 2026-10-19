@@ -34,6 +34,27 @@ class RuntimeIntegrationWiringTest {
         assertTrue(text.contains("new ExecuteConstructionTool(MinecraftConstructionBridge::open)"));
     }
 
+    @Test void constructionTerminalReconciliationPrecedesObsoleteSkillReturn() throws Exception {
+        String text = source("engine/src/main/java/com/mineagent/engine/loop/AgentLoop.java");
+        int callback = text.indexOf("public void onTaskFinished(");
+        int arbitration = text.indexOf("ToolExecution skillExecution =", callback);
+        String entry = text.substring(callback, arbitration);
+        assertTrue(entry.contains("\"execute_construction\".equals(dispatchedActionTools.get(taskId))"),
+                "Only actual construction dispatches may open and reconcile their namespace");
+        assertTrue(entry.contains(".taskFinished(taskId, state.name())"),
+                "Physical receipts must survive obsolete-skill early return and ledger eviction");
+    }
+
+    @Test void constructionRenameGuardPrecedesAnyNameMutation() throws Exception {
+        String text = engine();
+        int rename = text.indexOf("public static boolean renameCompanion(");
+        int mutation = text.indexOf("state.companion.rename(newName)", rename);
+        String beforeMutation = text.substring(rename, mutation);
+        assertTrue(beforeMutation.contains(".canRename(state.companion, newName)"),
+                "Owner/name-keyed construction storage cannot silently fork on rename");
+        assertTrue(beforeMutation.contains(".canRename(state.companion, newName)) return false;"));
+    }
+
     @Test void temporaryCleanupCannotBorrowExplicitMiningAuthority() throws Exception {
         String text = source("engine/src/main/java/com/mineagent/engine/planning/TemporaryBlockLedger.java");
         int wrapper = text.indexOf("public synchronized boolean tickIdle()");

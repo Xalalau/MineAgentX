@@ -20,6 +20,8 @@ public final class ConstructionRepository {
         this.root = root.toAbsolutePath().normalize();
         Files.createDirectories(this.root);
     }
+    /** Stable normalized namespace for bounded in-process review correlation, not a companion UUID. */
+    public Path scope() { return root; }
     public synchronized Revision save(ConstructionDesign design, int expectedVersion, String reason) throws IOException {
         Objects.requireNonNull(design); ConstructionDesign.text(reason);
         Path directory = root.resolve(design.id());
@@ -63,7 +65,16 @@ public final class ConstructionRepository {
         if (kind == null || !kind.matches("[a-z_]{1,32}") || tick < 0 || payload == null)
             throw new IllegalArgumentException("evidence");
         var existing = evidence(id, 0);
-        if (existing.size() >= MAX_EVENTS) throw new IllegalArgumentException("evidence_limit");
+        Set<Integer> pending = new HashSet<>();
+        for (var event : existing) {
+            if (event.kind().equals("dispatch")) pending.add(event.sequence());
+            else if (event.kind().equals("outcome") && event.payload().has("dispatch_sequence"))
+                pending.remove(event.payload().get("dispatch_sequence").getAsInt());
+        }
+        if (kind.equals("outcome") && payload.has("dispatch_sequence")) pending.remove(payload.get("dispatch_sequence").getAsInt());
+        // A physical dispatch owns one future terminal slot; previews/reviews cannot consume it.
+        int reserved = pending.size() + (kind.equals("dispatch") ? 1 : 0);
+        if (existing.size() + 1 + reserved > MAX_EVENTS) throw new IllegalArgumentException("evidence_limit");
         int sequence = existing.size() + 1;
         Evidence event = new Evidence(sequence, r.version, kind, tick, payload.deepCopy());
         String encoded = JSON.toJson(event);

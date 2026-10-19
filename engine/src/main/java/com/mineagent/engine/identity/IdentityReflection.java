@@ -4,6 +4,7 @@ package com.mineagent.engine.identity;
 public final class IdentityReflection {
     public static final long INTERVAL_TICKS = 1_200L;
     private final EvolvingIdentity identity;
+    private final java.util.function.IntSupplier configuredInterval;
     private long reviewedSequence;
     private long lastOpportunityTick = -1;
     private long generation;
@@ -12,6 +13,7 @@ public final class IdentityReflection {
     public synchronized EvolvingIdentity.Entry revise(long currentGeneration, String kind,
             String subject, String statement, String reason, java.util.List<String> evidenceIds,
             double confidence, long expectedRevision, String reconsideration) {
+        if (configuredInterval.getAsInt() == 0) close();
         if (remaining <= 0 || generation != currentGeneration) {
             throw new IllegalArgumentException("reflection_closed_or_stale");
         }
@@ -31,9 +33,17 @@ public final class IdentityReflection {
         lastOpportunityTick = state == null ? -1 : state.lastOpportunityTick();
     }
 
-    public IdentityReflection(EvolvingIdentity identity) { this.identity = identity; }
+    public IdentityReflection(EvolvingIdentity identity) {
+        this(identity, () -> com.mineagent.api.config.MineAgentConfig.ReflectionConfig.DEFAULTS.intervalTicks());
+    }
+
+    public IdentityReflection(EvolvingIdentity identity, java.util.function.IntSupplier configuredInterval) {
+        this.identity = java.util.Objects.requireNonNull(identity, "identity");
+        this.configuredInterval = java.util.Objects.requireNonNull(configuredInterval, "configuredInterval");
+    }
 
     public synchronized String context(String language, int maxChars) {
+        if (configuredInterval.getAsInt() == 0) close();
         if (remaining <= 0 || maxChars <= 0) return "";
         String text = IdentityText.text(language,
                 "A brief reflection opportunity is available in this decision turn. If useful, retrieve relevant evidence with identity_memory and retain at most " + remaining
@@ -44,9 +54,11 @@ public final class IdentityReflection {
     }
 
     public synchronized boolean open(long tick, long generation, boolean bodyBusy) {
+        int interval = new com.mineagent.api.config.MineAgentConfig.ReflectionConfig(configuredInterval.getAsInt()).intervalTicks();
+        if (interval == 0) { close(); return false; }
         if (bodyBusy || identity.evidenceSequence() <= reviewedSequence) return false;
         if (lastOpportunityTick >= 0 && tick >= lastOpportunityTick
-                && tick - lastOpportunityTick < INTERVAL_TICKS) return false;
+                && tick - lastOpportunityTick < interval) return false;
         reviewedSequence = identity.evidenceSequence();
         lastOpportunityTick = Math.max(0, tick);
         this.generation = generation;
