@@ -1,5 +1,6 @@
 package com.mineagent.tools.skill;
 
+import com.mineagent.tools.i18n.ToolMessages;
 import com.google.gson.JsonObject;
 import com.mineagent.api.agent.skill.SkillInfo;
 import com.mineagent.api.agent.skill.SkillRegistry;
@@ -24,17 +25,13 @@ public class LoadSkillTool implements Tool {
 
     @Override
     public String description() {
-        return """
-            Load a skill document into your context. Skills teach you how to
-            use specific capabilities (combat, crafting, mods, etc.).
-            The skill content becomes part of your knowledge for this session.
-            """;
+        return ToolMessages.text("load_skill.description");
     }
 
     @Override
     public Map<String, Object> parameterSchema() {
         return Schema.object()
-                .string("skill_name", "Name of the skill to load (e.g. 'combat_basics', 'nether_entry')")
+                .string("skill_name", ToolMessages.text("load_skill.parameter.skill_name"))
                 .build();
     }
 
@@ -43,7 +40,7 @@ public class LoadSkillTool implements Tool {
                               Consumer<String> reply) {
         String skillName = ToolArgs.getString(args, "skill_name");
         if (skillName == null) {
-            reply.accept("{\"error\":\"Missing required parameter 'skill_name'.\"}");
+            reply.accept(com.mineagent.api.agent.tool.ToolArgs.errorJson(ToolMessages.text("error.missing_required_parameter_skill_name")));
             return;
         }
 
@@ -75,7 +72,7 @@ public class LoadSkillTool implements Tool {
                         com.google.gson.JsonParser.parseString(value.actionSequence()));
             } catch (RuntimeException malformedSequence) {
                 result.addProperty("action_sequence", value.actionSequence());
-                result.addProperty("warning", "Stored sequence is not valid JSON; inspect before reuse");
+                result.addProperty("warning", ToolMessages.text("skills.invalid_sequence"));
             }
             reply.accept(result.toString());
             return;
@@ -84,7 +81,7 @@ public class LoadSkillTool implements Tool {
         {
             // List available skills
             StringBuilder available = new StringBuilder();
-            available.append("{\"error\":").append(new com.google.gson.Gson().toJson("Skill not found: " + skillName));
+            available.append("{\"error\":").append(new com.google.gson.Gson().toJson(ToolMessages.text("skills.not_found", skillName)));
             available.append(",\"available_skills\":[");
             boolean first = true;
             for (SkillInfo s : SkillRegistry.all()) {

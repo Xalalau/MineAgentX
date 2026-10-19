@@ -1,5 +1,8 @@
 package com.mineagent.tools.perception;
 
+import com.mineagent.tools.i18n.ToolMessages;
+import com.mineagent.tools.i18n.ToolOutput;
+
 import com.google.gson.JsonObject;
 import com.mineagent.api.agent.tool.Schema;
 import com.mineagent.api.agent.tool.Tool;
@@ -31,18 +34,14 @@ public class ScanNearbyEntitiesTool implements Tool {
 
     @Override
     public String description() {
-        return """
-            List entities within a radius of your position. Returns each
-            entity's ID, type, position, and health (for living entities).
-            Useful for finding mobs, animals, villagers, and dropped items.
-            """;
+        return ToolMessages.text("scan_nearby_entities.description");
     }
 
     @Override
     public Map<String, Object> parameterSchema() {
         return Schema.object()
-                .optionalInteger("radius", "Scan radius in blocks (1-64, default 16)", 1, 64)
-                .optionalString("entity_type", "Filter by entity type (e.g. 'minecraft:zombie'). If null, returns all entity types.")
+                .optionalInteger("radius", ToolMessages.text("scan_nearby_entities.parameter.radius"), 1, 64)
+                .optionalString("entity_type", ToolMessages.text("scan_nearby_entities.parameter.entity_type"))
                 .build();
     }
 
@@ -52,14 +51,14 @@ public class ScanNearbyEntitiesTool implements Tool {
         Integer radius = ToolArgs.has(args, "radius")
                 ? ToolArgs.getIntOrNull(args, "radius") : DEFAULT_RADIUS;
         if (radius == null || radius < 1 || radius > MAX_RADIUS) {
-            reply.accept(ToolArgs.errorJson("'radius' must be an integer from 1 to " + MAX_RADIUS + "."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.radius_must_be_an_integer_from_1_to_0", MAX_RADIUS)));
             return;
         }
         String entityType = ToolArgs.getString(args, "entity_type");
         if (entityType != null) {
             var id = net.minecraft.resources.ResourceLocation.tryParse(entityType);
             if (id == null || !net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.containsKey(id)) {
-                reply.accept(ToolArgs.errorJson("Unknown entity type: " + entityType));
+                reply.accept(ToolArgs.errorJson(ToolMessages.text("error.unknown_entity_type_0", entityType)));
                 return;
             }
             entityType = id.toString();
@@ -74,7 +73,7 @@ public class ScanNearbyEntitiesTool implements Tool {
         var entities = level.getEntities(sp, aabb, e -> true);
 
         StringBuilder sb = new StringBuilder();
-        sb.append("=== ENTITY SCAN (radius ").append(radius).append(") ===\n");
+        sb.append(ToolMessages.text("entities.header")).append(radius).append(") ===\n");
 
         int count = 0;
         int threatCount = 0;
@@ -98,19 +97,19 @@ public class ScanNearbyEntitiesTool implements Tool {
             String direction = getDirection(dx, dz);
             double dist = Math.sqrt(distSq);
 
-            sb.append(String.format(Locale.ROOT, "%d. %s at (%.0f,%.0f,%.0f) %s dist=%.1f",
+            sb.append(ToolOutput.formatted("entities.position",
                     count + 1, cleanName, entity.getX(), entity.getY(), entity.getZ(),
                     direction, dist));
 
             // Health
             if (entity instanceof net.minecraft.world.entity.LivingEntity living) {
-                sb.append(String.format(Locale.ROOT, " HP=%.0f/%.0f", living.getHealth(), living.getMaxHealth()));
+                sb.append(ToolOutput.formatted("entities.health", living.getHealth(), living.getMaxHealth()));
             }
 
             // Threat assessment
             boolean isHostile = entity instanceof net.minecraft.world.entity.monster.Monster;
             if (isHostile) {
-                sb.append(" [HOSTILE]");
+                sb.append(ToolMessages.text("entities.hostile"));
                 threatCount++;
             }
 
@@ -122,43 +121,43 @@ public class ScanNearbyEntitiesTool implements Tool {
                     if (target instanceof Player p) {
                         targetName = p.getName().getString();
                         playerInDanger++;
-                        sb.append(" >> ATTACKING: ").append(targetName);
-                        sb.append(String.format(Locale.ROOT, " (HP=%.0f/%.0f)", p.getHealth(), p.getMaxHealth()));
+                        sb.append(ToolMessages.text("entities.attacking")).append(targetName);
+                        sb.append(ToolOutput.formatted("entities.target_health", p.getHealth(), p.getMaxHealth()));
                     } else {
                         targetName = net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE
                                 .getKey(target.getType()).toString().replace("minecraft:", "");
-                        sb.append(" >> ATTACKING: ").append(targetName);
+                        sb.append(ToolMessages.text("entities.attacking")).append(targetName);
                     }
                 }
-                if (mob.isAggressive()) sb.append(" [AGGRESSIVE]");
+                if (mob.isAggressive()) sb.append(ToolMessages.text("entities.aggressive"));
             }
 
             // Player status
             if (entity instanceof Player p) {
-                if (p.hurtTime > 0) sb.append(" [TAKING DAMAGE]");
-                if (p.getHealth() < p.getMaxHealth() * 0.3f) sb.append(" [CRITICAL]");
+                if (p.hurtTime > 0) sb.append(ToolMessages.text("entities.damage"));
+                if (p.getHealth() < p.getMaxHealth() * 0.3f) sb.append(ToolMessages.text("entities.critical"));
             }
 
             // Special states
-            if (entity.isOnFire()) sb.append(" [BURNING]");
-            if (entity.isInWater()) sb.append(" [IN WATER]");
+            if (entity.isOnFire()) sb.append(ToolMessages.text("entities.burning"));
+            if (entity.isInWater()) sb.append(ToolMessages.text("entities.water"));
             if (entity instanceof net.minecraft.world.entity.AgeableMob ageable && ageable.isBaby()) {
-                sb.append(" [BABY]");
+                sb.append(ToolMessages.text("entities.baby"));
             }
 
             sb.append("\n");
             count++;
         }
 
-        sb.append("\n--- SUMMARY ---\n");
-        sb.append(String.format(Locale.ROOT, "Total: %d entities | Hostile: %d | Players in danger: %d\n",
+        sb.append(ToolMessages.text("entities.summary"));
+        sb.append(ToolOutput.formatted("entities.counts",
                 count, threatCount, playerInDanger));
 
         if (playerInDanger > 0) {
-            sb.append("** WARNING: Player is under attack! **\n");
+            sb.append(ToolMessages.text("entities.player_danger"));
         }
         if (threatCount > 3) {
-            sb.append("** CAUTION: Multiple hostiles nearby. Consider retreating. **\n");
+            sb.append(ToolMessages.text("entities.retreat"));
         }
 
         reply.accept(sb.toString());

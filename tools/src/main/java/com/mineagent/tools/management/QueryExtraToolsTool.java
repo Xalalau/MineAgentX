@@ -1,5 +1,6 @@
 package com.mineagent.tools.management;
 
+import com.mineagent.tools.i18n.ToolMessages;
 import com.google.gson.JsonObject;
 import com.mineagent.api.agent.tool.Schema;
 import com.mineagent.api.agent.tool.Tool;
@@ -26,11 +27,7 @@ public class QueryExtraToolsTool implements Tool {
 
     @Override
     public String description() {
-        return """
-            Expose specialized tools that are not in the compact default tool
-            surface. The next model request contains their complete callable
-            schemas, and they remain exposed for the current owner goal.
-            """;
+        return ToolMessages.text("query_extra_tools.description");
     }
 
     @Override
@@ -69,7 +66,7 @@ public class QueryExtraToolsTool implements Tool {
         result.add("exposed_tools", extraTools);
         result.addProperty("total_extra", count);
         result.addProperty("next_step",
-                "Call the required tool directly; its full schema is now available.");
+                ToolMessages.text("output.discovery"));
         reply.accept(result.toString());
     }
 }

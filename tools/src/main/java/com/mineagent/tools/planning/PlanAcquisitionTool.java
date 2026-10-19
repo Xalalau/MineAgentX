@@ -1,5 +1,6 @@
 package com.mineagent.tools.planning;
 
+import com.mineagent.tools.i18n.ToolMessages;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.mineagent.api.agent.tool.Schema;
@@ -38,18 +39,15 @@ public final class PlanAcquisitionTool implements Tool {
 
     @Override
     public String description() {
-        return "Expand an exact registered item/count into a bounded dependency graph using "
-                + "live inventory, actually observed storage/drops, recipe yields, ingredient "
-                + "alternatives and registered recipe types. Use before a long production task; "
-                + "unknown station mechanics remain explicit exploration leaves.";
+        return ToolMessages.text("plan_acquisition.description");
     }
 
     @Override
     public Map<String, Object> parameterSchema() {
         return Schema.object()
-                .string("item_id", "Exact registered output item ID")
-                .integer("desired_count", "Desired total carried count", 1, 4096)
-                .optionalInteger("max_depth", "Maximum recursive recipe depth (default 6)",
+                .string("item_id", ToolMessages.text("plan_acquisition.parameter.item_id"))
+                .integer("desired_count", ToolMessages.text("plan_acquisition.parameter.desired_count"), 1, 4096)
+                .optionalInteger("max_depth", ToolMessages.text("plan_acquisition.parameter.max_depth"),
                         1, MAX_DEPTH)
                 .build();
     }
@@ -61,26 +59,25 @@ public final class PlanAcquisitionTool implements Tool {
         ResourceLocation target = requested == null ? null
                 : ResourceLocation.tryParse(requested.trim());
         if (target == null || !BuiltInRegistries.ITEM.containsKey(target)) {
-            reply.accept(ToolArgs.errorJson("Unknown registered item: " + requested));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.unknown_registered_item_0", String.valueOf(requested))));
             return;
         }
         Integer desired = ToolArgs.getIntOrNull(args, "desired_count");
         Integer depth = ToolArgs.has(args, "max_depth")
                 ? ToolArgs.getIntOrNull(args, "max_depth") : 6;
         if (desired == null || desired < 1 || desired > 4096) {
-            reply.accept(ToolArgs.errorJson("'desired_count' must be an integer from 1 to 4096."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.desired_count_must_be_an_integer_from_1_to_4096")));
             return;
         }
         if (depth == null || depth < 1 || depth > MAX_DEPTH) {
-            reply.accept(ToolArgs.errorJson("'max_depth' must be an integer from 1 to "
-                    + MAX_DEPTH + "."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.max_depth_must_be_an_integer_from_1_to_0", MAX_DEPTH)));
             return;
         }
 
         var sp = ((CompanionEntity) player).serverPlayer();
         var loop = TaskContext.agentLoop(player);
         if (loop == null) {
-            reply.accept(ToolArgs.errorJson("Agent cognitive state is not available."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.agent_cognitive_state_is_not_available")));
             return;
         }
         long gameTick = sp.level().getGameTime();
@@ -117,9 +114,7 @@ public final class PlanAcquisitionTool implements Tool {
         context.executionRequirements.forEach(executionRequirements::add);
         result.add("execution_requirements", executionRequirements);
         result.addProperty("execution_rule",
-                "Retrieve observed assets before production; execute crafting recipes with craft; "
-                        + "for other recipe types use the named station and verify its live GUI; "
-                        + "explore unknown station mechanics instead of guessing or spawning outputs.");
+                ToolMessages.text("output.acquisition_hint"));
         reply.accept(result.toString());
     }
 
@@ -186,18 +181,18 @@ public final class PlanAcquisitionTool implements Tool {
             Ledger.Supply supplied = ledger.take(item, requested);
             int deficit = Math.max(0, requested - supplied.total());
             if (deficit == 0) {
-                return leaf(item, requested, supplied, 0, "satisfied by observed ownership");
+                return leaf(item, requested, supplied, 0, ToolMessages.text("acquisition.owned"));
             }
             if (nodeCount >= MAX_NODES || depth >= maxDepth) {
                 truncated = true;
                 addLeaf(item, deficit);
                 return leaf(item, requested, supplied, deficit,
-                        "dependency budget reached; observe or extend planning depth");
+                        ToolMessages.text("acquisition.budget"));
             }
             if (!path.add(item)) {
                 addLeaf(item, deficit);
                 return leaf(item, requested, supplied, deficit,
-                        "recipe cycle detected; choose a different recipe or source");
+                        ToolMessages.text("acquisition.cycle"));
             }
 
             RecipeChoice choice = recipes.best(item);
@@ -205,8 +200,8 @@ public final class PlanAcquisitionTool implements Tool {
                 path.remove(item);
                 addLeaf(item, deficit);
                 return leaf(item, requested, supplied, deficit,
-                        choice == null ? "no registered producing recipe"
-                                : "recipe exposes no static ingredient contract; inspect its mechanism");
+                        choice == null ? ToolMessages.text("acquisition.no_recipe")
+                                : ToolMessages.text("acquisition.dynamic_recipe"));
             }
 
             int batches = divideRoundUp(deficit, choice.outputCount());
@@ -343,9 +338,9 @@ public final class PlanAcquisitionTool implements Tool {
                     station = type;
                     execution = "interact_with_station_and_verify_gui";
                     if (isFuelledCooking(type)) {
-                        note = "Fuel is an external station requirement and is not part of the recipe ingredient list.";
+                        note = ToolMessages.text("acquisition.fuel");
                     } else {
-                        note = "The registered recipe identifies dependencies, but its station contract must be observed or adapted.";
+                        note = ToolMessages.text("acquisition.station");
                     }
                 }
                 RecipeChoice choice = new RecipeChoice(holder.id().toString(), type,

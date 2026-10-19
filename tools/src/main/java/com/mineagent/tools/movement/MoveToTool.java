@@ -1,5 +1,6 @@
 package com.mineagent.tools.movement;
 
+import com.mineagent.tools.i18n.ToolMessages;
 import com.google.gson.JsonObject;
 import com.mineagent.api.agent.tool.Schema;
 import com.mineagent.api.agent.tool.Tool;
@@ -28,25 +29,16 @@ public class MoveToTool implements Tool {
 
     @Override
     public String description() {
-        return """
-            Move to a target position using pathfinding. Supports 4 goal modes:
-            - "xz": walk to horizontal coordinates (x, z) at current y-level
-            - "xzy": walk to exact block position (x, y, z)
-            - "y": climb/descend to altitude y
-            - "block": walk adjacent to the block at (x, y, z)
-            
-            The companion will dig through blocks, build bridges, and climb pillars
-            to reach the goal. Returns a task_id for tracking.
-            """;
+        return ToolMessages.text("goto.description");
     }
 
     @Override
     public Map<String, Object> parameterSchema() {
         return Schema.object()
-                .string("goal_mode", "Goal mode: xz, xzy, y, or block")
-                .optionalInteger("x", "Target X coordinate (required for xz/xzy/block)", -30_000_000, 30_000_000)
-                .optionalInteger("y", "Target Y coordinate (required for xzy/y/block)", Integer.MIN_VALUE, Integer.MAX_VALUE)
-                .optionalInteger("z", "Target Z coordinate (required for xz/xzy/block)", Integer.MIN_VALUE, Integer.MAX_VALUE)
+                .string("goal_mode", ToolMessages.text("goto.parameter.goal_mode"))
+                .optionalInteger("x", ToolMessages.text("goto.parameter.x"), -30_000_000, 30_000_000)
+                .optionalInteger("y", ToolMessages.text("goto.parameter.y"), Integer.MIN_VALUE, Integer.MAX_VALUE)
+                .optionalInteger("z", ToolMessages.text("goto.parameter.z"), Integer.MIN_VALUE, Integer.MAX_VALUE)
                 .build();
     }
 
@@ -55,7 +47,7 @@ public class MoveToTool implements Tool {
                               Consumer<String> reply) {
         String goalMode = ToolArgs.getString(args, "goal_mode");
         if (goalMode == null) {
-            reply.accept("{\"error\":\"Missing required parameter 'goal_mode'. Use xz/xzy/y/block.\"}");
+            reply.accept(com.mineagent.api.agent.tool.ToolArgs.errorJson(ToolMessages.text("error.missing_required_parameter_goal_mode_use_xz_xzy_y_block")));
             return;
         }
         goalMode = goalMode.trim().toLowerCase(java.util.Locale.ROOT);
@@ -65,8 +57,7 @@ public class MoveToTool implements Tool {
 
         // Validate goal mode
         if (!java.util.Set.of("xz", "xzy", "y", "block").contains(goalMode)) {
-            reply.accept(ToolArgs.errorJson("Invalid goal_mode: " + goalMode
-                    + ". Use xz/xzy/y/block."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.invalid_goal_mode_0_use_xz_xzy_y_block", goalMode)));
             return;
         }
 
@@ -74,20 +65,19 @@ public class MoveToTool implements Tool {
         switch (goalMode) {
             case "xz" -> {
                 if (parsedX == null || z == null) {
-                    reply.accept("{\"error\":\"goal_mode 'xz' requires both x and z coordinates.\"}");
+                    reply.accept(com.mineagent.api.agent.tool.ToolArgs.errorJson(ToolMessages.text("error.goal_mode_xz_requires_both_x_and_z_coordinates")));
                     return;
                 }
             }
             case "xzy", "block" -> {
                 if (parsedX == null || y == null || z == null) {
-                    reply.accept(ToolArgs.errorJson("goal_mode '" + goalMode
-                            + "' requires x, y, and z coordinates."));
+                    reply.accept(ToolArgs.errorJson(ToolMessages.text("error.goal_mode_0_requires_x_y_and_z_coordinates", goalMode)));
                     return;
                 }
             }
             case "y" -> {
                 if (y == null) {
-                    reply.accept("{\"error\":\"goal_mode 'y' requires a y coordinate.\"}");
+                    reply.accept(com.mineagent.api.agent.tool.ToolArgs.errorJson(ToolMessages.text("error.goal_mode_y_requires_a_y_coordinate")));
                     return;
                 }
             }
@@ -100,7 +90,7 @@ public class MoveToTool implements Tool {
         var level = ((com.mineagent.engine.entity.CompanionEntity) player)
                 .serverPlayer().serverLevel();
         if (!level.isInWorldBounds(target)) {
-            reply.accept(ToolArgs.errorJson("Target is outside this dimension's world bounds: " + target.toShortString()));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.target_is_outside_this_dimension_s_world_bounds_0", target.toShortString())));
             return;
         }
 

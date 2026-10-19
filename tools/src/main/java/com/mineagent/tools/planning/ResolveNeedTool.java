@@ -1,5 +1,6 @@
 package com.mineagent.tools.planning;
 
+import com.mineagent.tools.i18n.ToolMessages;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.mineagent.api.agent.tool.Schema;
@@ -28,23 +29,16 @@ public final class ResolveNeedTool implements Tool {
 
     @Override
     public String description() {
-        return """
-                Resolve an item or capability need before crafting or replacing
-                equipment. Searches current inventory/equipment, actually
-                inspected container contents, observed dropped items and world
-                facilities. For exact items it also returns live registered
-                recipes, including modded recipes. Container memory must be
-                verified in reach before transfer.
-                """;
+        return ToolMessages.text("resolve_need.description");
     }
 
     @Override
     public Map<String, Object> parameterSchema() {
         return Schema.object()
-                .string("kind", "Need kind: 'item' or 'capability'")
-                .string("target", "Exact registered item ID, or an observed capability such as tool:axe, craft_3x3, smelt, retrieve_items, armor:head")
-                .optionalInteger("desired_count", "Required exact item count (default 1)", 1, 4096)
-                .optionalString("purpose", "What the asset must accomplish; used to preserve task intent in the result")
+                .string("kind", ToolMessages.text("resolve_need.parameter.kind"))
+                .string("target", ToolMessages.text("resolve_need.parameter.target"))
+                .optionalInteger("desired_count", ToolMessages.text("resolve_need.parameter.desired_count"), 1, 4096)
+                .optionalString("purpose", ToolMessages.text("resolve_need.parameter.purpose"))
                 .build();
     }
 
@@ -53,18 +47,18 @@ public final class ResolveNeedTool implements Tool {
                              Consumer<String> reply) {
         String kind = ToolArgs.getString(args, "kind");
         if (!"item".equals(kind) && !"capability".equals(kind)) {
-            reply.accept(ToolArgs.errorJson("'kind' must be 'item' or 'capability'."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.kind_must_be_item_or_capability")));
             return;
         }
         String target = ToolArgs.getString(args, "target");
         if (target == null || target.isBlank()) {
-            reply.accept(ToolArgs.errorJson("Missing required parameter 'target'."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.missing_required_parameter_target")));
             return;
         }
         Integer desired = ToolArgs.has(args, "desired_count")
                 ? ToolArgs.getIntOrNull(args, "desired_count") : 1;
         if (desired == null || desired < 1 || desired > 4096) {
-            reply.accept(ToolArgs.errorJson("'desired_count' must be an integer from 1 to 4096."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.desired_count_must_be_an_integer_from_1_to_4096")));
             return;
         }
 
@@ -72,7 +66,7 @@ public final class ResolveNeedTool implements Tool {
         if ("item".equals(kind)) {
             itemId = ResourceLocation.tryParse(target.trim());
             if (itemId == null || !BuiltInRegistries.ITEM.containsKey(itemId)) {
-                reply.accept(ToolArgs.errorJson("Unknown registered item: " + target));
+                reply.accept(ToolArgs.errorJson(ToolMessages.text("error.unknown_registered_item_0", target)));
                 return;
             }
             target = itemId.toString();
@@ -81,7 +75,7 @@ public final class ResolveNeedTool implements Tool {
         var sp = ((CompanionEntity) player).serverPlayer();
         var loop = TaskContext.agentLoop(player);
         if (loop == null) {
-            reply.accept(ToolArgs.errorJson("Agent cognitive state is not available."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.agent_cognitive_state_is_not_available")));
             return;
         }
         WorldAssetIndex index = loop.worldAssetIndex();
@@ -101,7 +95,7 @@ public final class ResolveNeedTool implements Tool {
         result.addProperty("desired_count", resolution.desiredCount());
         result.addProperty("carried_exact_count", resolution.carriedExactCount());
         result.addProperty("satisfied_now", resolution.satisfiedNow());
-        result.addProperty("purpose", ToolArgs.getString(args, "purpose", "unspecified"));
+        result.addProperty("purpose", ToolArgs.getString(args, "purpose", ToolMessages.text("need.unspecified")));
         result.addProperty("asset_revision", resolution.revision());
 
         JsonArray candidates = new JsonArray();
@@ -118,7 +112,7 @@ public final class ResolveNeedTool implements Tool {
                 && !recipes.isEmpty()) recommendation = "choose_registered_recipe_and_acquire_missing_inputs";
         result.addProperty("recommended_action", recommendation);
         result.addProperty("decision_rule",
-                "Reuse carried assets first; verify known storage before retrieval; reuse a suitable world facility; produce only the unresolved deficit or an explicitly requested extra copy.");
+                ToolMessages.text("need.decision"));
         reply.accept(result.toString());
     }
 

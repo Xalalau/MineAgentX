@@ -1,5 +1,6 @@
 package com.mineagent.tools.perception;
 
+import com.mineagent.tools.i18n.ToolMessages;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.mineagent.api.agent.tool.Schema;
@@ -26,14 +27,13 @@ public class ScanBlocksTool implements Tool {
 
     @Override public String name() { return "scan_blocks"; }
     @Override public String description() {
-        return "Scan loaded nearby blocks by exact ID or block tag, return nearest positions, "
-                + "and remember the observed registered block IDs for later recall.";
+        return ToolMessages.text("scan_blocks.description");
     }
     @Override
     public Map<String, Object> parameterSchema() {
         return Schema.object()
-                .string("block_type", "Block ID or #block_tag")
-                .optionalInteger("radius", "Scan radius in blocks (1-32, default 16)", 1, 32)
+                .string("block_type", ToolMessages.text("scan_blocks.parameter.block_type"))
+                .optionalInteger("radius", ToolMessages.text("scan_blocks.parameter.radius"), 1, 32)
                 .build();
     }
 
@@ -42,13 +42,13 @@ public class ScanBlocksTool implements Tool {
                              Consumer<String> reply) {
         String requestedType = ToolArgs.getString(args, "block_type");
         if (requestedType == null || requestedType.isBlank()) {
-            reply.accept(ToolArgs.errorJson("Missing required parameter 'block_type'."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.missing_required_parameter_block_type")));
             return;
         }
         Integer radius = ToolArgs.has(args, "radius")
                 ? ToolArgs.getIntOrNull(args, "radius") : 16;
         if (radius == null || radius < 1 || radius > 32) {
-            reply.accept(ToolArgs.errorJson("'radius' must be an integer from 1 to 32."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.radius_must_be_an_integer_from_1_to_32")));
             return;
         }
 
@@ -57,17 +57,17 @@ public class ScanBlocksTool implements Tool {
         ResourceLocation id = ResourceLocation.tryParse(
                 requestedType.startsWith("#") ? requestedType.substring(1) : requestedType);
         if (id == null) {
-            reply.accept(ToolArgs.errorJson("Invalid block or tag ID: " + requestedType));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.invalid_block_or_tag_id_0", requestedType)));
             return;
         }
         if (requestedType.startsWith("#")) {
             tag = TagKey.create(Registries.BLOCK, id);
             if (sp.level().registryAccess().lookupOrThrow(Registries.BLOCK).get(tag).isEmpty()) {
-                reply.accept(ToolArgs.errorJson("Unknown block tag: #" + id));
+                reply.accept(ToolArgs.errorJson(ToolMessages.text("error.unknown_block_tag_0", id)));
                 return;
             }
         } else if (!BuiltInRegistries.BLOCK.containsKey(id)) {
-            reply.accept(ToolArgs.errorJson("Unknown block: " + id));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.unknown_block_0", id)));
             return;
         }
 
@@ -158,7 +158,7 @@ public class ScanBlocksTool implements Tool {
                     dimension, now);
             loop.placeMemory().remember("block", id,
                     pos.getX(), pos.getY(), pos.getZ(), dimension, now,
-                    "Observed by scan_blocks");
+                    ToolMessages.text("memory.scan_evidence"));
         }
 
         private void advance() {
@@ -177,12 +177,12 @@ public class ScanBlocksTool implements Tool {
 
         @Override
         public void onFailure(Throwable failure) {
-            respondOnce(ToolArgs.errorJson("Block scan failed: " + failure.getMessage()));
+            respondOnce(ToolArgs.errorJson(ToolMessages.text("error.block_scan_failed_0", String.valueOf(failure.getMessage()))));
         }
 
         @Override
         public void onDiscarded() {
-            respondOnce(ToolArgs.errorJson("Block scan cancelled because the companion was removed."));
+            respondOnce(ToolArgs.errorJson(ToolMessages.text("error.block_scan_cancelled_because_the_companion_was_removed")));
         }
 
         private void respondOnce(String value) {

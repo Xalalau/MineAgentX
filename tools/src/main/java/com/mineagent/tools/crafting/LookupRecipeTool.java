@@ -1,5 +1,6 @@
 package com.mineagent.tools.crafting;
 
+import com.mineagent.tools.i18n.ToolMessages;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.mineagent.api.agent.tool.Schema;
@@ -19,13 +20,13 @@ public class LookupRecipeTool implements Tool {
 
     @Override public String name() { return "lookup_recipe"; }
     @Override public String description() {
-        return "Find registered recipes that produce or consume an exact item ID, including ingredient alternatives.";
+        return ToolMessages.text("lookup_recipe.description");
     }
     @Override
     public Map<String, Object> parameterSchema() {
         return Schema.object()
-                .string("query", "Registered item ID (e.g. 'minecraft:stick')")
-                .string("mode", "Search mode: 'output' or 'input'")
+                .string("query", ToolMessages.text("lookup_recipe.parameter.query"))
+                .string("mode", ToolMessages.text("lookup_recipe.parameter.mode"))
                 .build();
     }
 
@@ -35,12 +36,12 @@ public class LookupRecipeTool implements Tool {
         String query = ToolArgs.getString(args, "query");
         ResourceLocation queryId = query == null ? null : ResourceLocation.tryParse(query);
         if (queryId == null || !BuiltInRegistries.ITEM.containsKey(queryId)) {
-            reply.accept(ToolArgs.errorJson("Unknown item: " + query));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.unknown_item", String.valueOf(query))));
             return;
         }
         String mode = ToolArgs.getString(args, "mode");
         if (!"output".equals(mode) && !"input".equals(mode)) {
-            reply.accept(ToolArgs.errorJson("'mode' must be 'output' or 'input'."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.mode_must_be_output_or_input")));
             return;
         }
 

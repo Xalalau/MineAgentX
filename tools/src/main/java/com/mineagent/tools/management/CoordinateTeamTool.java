@@ -1,5 +1,6 @@
 package com.mineagent.tools.management;
 
+import com.mineagent.tools.i18n.ToolMessages;
 import com.google.gson.JsonObject;
 import com.mineagent.api.agent.tool.Schema;
 import com.mineagent.api.agent.tool.Tool;
@@ -23,26 +24,25 @@ public final class CoordinateTeamTool implements Tool {
 
     @Override
     public String description() {
-        return "Inspect team state, claim a role/objective, request teammate support, "
-                + "or clear your commitment. Use this instead of ordinary chat for coordination.";
+        return ToolMessages.text("coordinate_team.description");
     }
 
     @Override
     public Map<String, Object> parameterSchema() {
         Map<String, Object> schema = new java.util.LinkedHashMap<>(Schema.object()
-                .string("action", "One of: status, commit, request_support, clear")
-                .optionalString("objective", "Objective to claim when action=commit")
-                .optionalString("role", "Team role, such as builder, defender, scout or gatherer")
-                .optionalString("request", "Concrete help required when action=request_support")
-                .optionalString("priority", "low, medium, high or critical")
-                .optionalString("target", "Optional coordinate, entity or asset target")
+                .string("action", ToolMessages.text("coordinate_team.parameter.action"))
+                .optionalString("objective", ToolMessages.text("coordinate_team.parameter.objective"))
+                .optionalString("role", ToolMessages.text("coordinate_team.parameter.role"))
+                .optionalString("request", ToolMessages.text("coordinate_team.parameter.request"))
+                .optionalString("priority", ToolMessages.text("coordinate_team.parameter.priority"))
+                .optionalString("target", ToolMessages.text("coordinate_team.parameter.target"))
                 .build());
         @SuppressWarnings("unchecked")
         Map<String, Map<String, Object>> properties = new java.util.LinkedHashMap<>(
                 (Map<String, Map<String, Object>>) schema.get("properties"));
         properties.put("action", Map.of("type", "string",
                 "enum", List.of("status", "commit", "request_support", "clear"),
-                "description", "Coordination operation"));
+                "description", ToolMessages.text("coordinate_team.parameter.action_detail")));
         schema.put("properties", java.util.Collections.unmodifiableMap(properties));
         return java.util.Collections.unmodifiableMap(schema);
     }
@@ -52,14 +52,14 @@ public final class CoordinateTeamTool implements Tool {
                              Consumer<String> reply) {
         String action = ToolArgs.getString(args, "action");
         if (action == null) {
-            reply.accept(ToolArgs.errorJson("'action' is required."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.action_is_required")));
             return;
         }
         long gameTick;
         try {
             gameTick = TaskContext.serverPlayer(player).level().getGameTime();
         } catch (RuntimeException failure) {
-            reply.accept(ToolArgs.errorJson("Companion is no longer active."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.companion_is_no_longer_active")));
             return;
         }
 
@@ -73,8 +73,7 @@ public final class CoordinateTeamTool implements Tool {
             case "commit" -> {
                 String objective = bounded(args, "objective");
                 if (objective == null) {
-                    reply.accept(ToolArgs.errorJson(
-                            "'objective' is required and must be at most " + MAX_TEXT + " characters."));
+                    reply.accept(ToolArgs.errorJson(ToolMessages.text("error.objective_is_required_and_must_be_at_most_0_characters", MAX_TEXT)));
                     return;
                 }
                 TeamBlackboard.ClaimResult claim = TeamBlackboard.tryCommit(
@@ -88,14 +87,12 @@ public final class CoordinateTeamTool implements Tool {
             case "request_support" -> {
                 String request = bounded(args, "request");
                 if (request == null) {
-                    reply.accept(ToolArgs.errorJson(
-                            "'request' is required and must be at most " + MAX_TEXT + " characters."));
+                    reply.accept(ToolArgs.errorJson(ToolMessages.text("error.request_is_required_and_must_be_at_most_0_characters", MAX_TEXT)));
                     return;
                 }
                 String priority = defaulted(bounded(args, "priority"), "high");
                 if (!PRIORITIES.contains(priority)) {
-                    reply.accept(ToolArgs.errorJson(
-                            "'priority' must be low, medium, high or critical."));
+                    reply.accept(ToolArgs.errorJson(ToolMessages.text("error.priority_must_be_low_medium_high_or_critical")));
                     return;
                 }
                 String target = bounded(args, "target");
@@ -104,9 +101,7 @@ public final class CoordinateTeamTool implements Tool {
                 // Support is exceptional and time-sensitive, so it is the one
                 // blackboard mutation that explicitly wakes sibling planners.
                 MineAgentEngine.broadcastToOtherCompanions(player.companionId(),
-                        player.ownerUuid(), "[TEAM] SUPPORT priority=" + priority
-                                + " request=" + request
-                                + (target == null ? "" : " target=" + target));
+                        player.ownerUuid(), ToolMessages.text("team.support", priority, request, target == null ? "" : ToolMessages.text("team.target", target)));
                 result.addProperty("success", true);
                 result.addProperty("support_requested", request);
             }
@@ -116,7 +111,7 @@ public final class CoordinateTeamTool implements Tool {
                 result.addProperty("cleared", true);
             }
             default -> {
-                reply.accept(ToolArgs.errorJson("Unknown action: " + action));
+                reply.accept(ToolArgs.errorJson(ToolMessages.text("error.unknown_action_0", action)));
                 return;
             }
         }

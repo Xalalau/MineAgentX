@@ -1,5 +1,6 @@
 package com.mineagent.tools.management;
 
+import com.mineagent.tools.i18n.ToolMessages;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.mineagent.api.agent.tool.Schema;
@@ -37,20 +38,18 @@ public final class TodowriteTool implements Tool {
     @Override public String name() { return "todowrite"; }
 
     @Override public String description() {
-        return "Create or repair the verifier-backed long-horizon plan. Use update_mode=repair "
-                + "after a blocker so verified checkpoints are retained. Completed steps and "
-                + "top-level goal acceptance require observed executor/world evidence.";
+        return ToolMessages.text("todowrite.description");
     }
 
     @Override
     public Map<String, Object> parameterSchema() {
         Map<String, Object> todoItem = objectSchema(Map.of(
-                "id", Map.of("type", "string", "description", "Stable step ID"),
-                "content", Map.of("type", "string", "description", "Concrete subgoal"),
+                "id", Map.of("type", "string", "description", ToolMessages.text("todowrite.parameter.todos.id")),
+                "content", Map.of("type", "string", "description", ToolMessages.text("todowrite.parameter.todos.content")),
                 "success_criterion", Map.of("type", List.of("string", "null"),
-                        "description", "Observable completion condition"),
+                        "description", ToolMessages.text("todowrite.parameter.todos.success_criterion")),
                 "depends_on", Map.of("type", "array",
-                        "description", "Step IDs that must be verified first",
+                        "description", ToolMessages.text("todowrite.parameter.todos.depends_on"),
                         "items", Map.of("type", "string"), "maxItems", MAX_ITEMS),
                 "priority", Map.of("type", "string", "enum", List.of("high", "medium", "low")),
                 "status", Map.of("type", "string", "enum",
@@ -64,23 +63,23 @@ public final class TodowriteTool implements Tool {
         ), List.of("id", "kind", "description"));
         Map<String, Object> conditionItem = objectSchema(Map.of(
                 "subject", Map.of("type", "string",
-                        "description", "Semantic subject, e.g. inventory:minecraft:iron_ingot"),
+                        "description", ToolMessages.text("todowrite.parameter.goal_conditions.subject")),
                 "predicate", Map.of("type", "string",
-                        "description", "Semantic predicate, e.g. count"),
+                        "description", ToolMessages.text("todowrite.parameter.goal_conditions.predicate")),
                 "value", Map.of("type", "string",
-                        "description", "Expected string or finite numeric value"),
+                        "description", ToolMessages.text("todowrite.parameter.goal_conditions.value")),
                 "comparison", Map.of("type", "string", "enum",
                         List.of("equals", "at_least", "at_most", "present")),
                 "minimum_confidence", Map.of("type", List.of("number", "null"),
                         "minimum", 0.0, "maximum", 1.0)
         ), List.of("subject", "predicate", "value", "comparison"));
         return Schema.object()
-                .optionalString("goal", "The owner's current top-level goal")
-                .optionalString("update_mode", "Plan update: 'replace' for a new goal or 'repair' for the invalid suffix")
-                .array("todos", "Complete ordered plan; replaces prior nodes", todoItem, 0)
-                .optionalArray("constraints", "Hard constraints and owner preferences; omitted preserves existing constraints",
+                .optionalString("goal", ToolMessages.text("todowrite.parameter.goal"))
+                .optionalString("update_mode", ToolMessages.text("todowrite.parameter.update_mode"))
+                .array("todos", ToolMessages.text("todowrite.parameter.todos"), todoItem, 0)
+                .optionalArray("constraints", ToolMessages.text("todowrite.parameter.constraints"),
                         constraintItem, 0)
-                .optionalArray("goal_conditions", "Machine-checkable top-level acceptance conditions; omitted preserves them during repair",
+                .optionalArray("goal_conditions", ToolMessages.text("todowrite.parameter.goal_conditions"),
                         conditionItem, 0)
                 .build();
     }
@@ -90,11 +89,11 @@ public final class TodowriteTool implements Tool {
                              Consumer<String> reply) {
         JsonArray todos = ToolArgs.getArray(args, "todos");
         if (todos == null) {
-            reply.accept(ToolArgs.errorJson("'todos' must be a JSON array."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.todos_must_be_a_json_array")));
             return;
         }
         if (todos.size() > MAX_ITEMS) {
-            reply.accept(ToolArgs.errorJson("'todos' may contain at most " + MAX_ITEMS + " items."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.todos_may_contain_at_most_0_items", MAX_ITEMS)));
             return;
         }
 
@@ -102,44 +101,41 @@ public final class TodowriteTool implements Tool {
         Set<String> ids = new java.util.HashSet<>();
         for (int index = 0; index < todos.size(); index++) {
             if (!todos.get(index).isJsonObject()) {
-                reply.accept(ToolArgs.errorJson("Todo item " + index + " must be an object."));
+                reply.accept(ToolArgs.errorJson(ToolMessages.text("error.todo_item_0_must_be_an_object", index)));
                 return;
             }
             JsonObject value = todos.get(index).getAsJsonObject();
             String id = ToolArgs.getString(value, "id");
             String content = ToolArgs.getString(value, "content");
             String criterion = ToolArgs.getString(value, "success_criterion",
-                    "A body task provides observable success evidence");
+                    ToolMessages.text("output.default_evidence"));
             String priority = ToolArgs.getString(value, "priority", "medium");
             String status = ToolArgs.getString(value, "status", "pending");
             if (!validText(id, 64) || !validText(content, MAX_TEXT_LENGTH)
                     || !validText(criterion, MAX_TEXT_LENGTH)) {
-                reply.accept(ToolArgs.errorJson("Todo item " + index + " contains invalid text."));
+                reply.accept(ToolArgs.errorJson(ToolMessages.text("error.todo_item_0_contains_invalid_text", index)));
                 return;
             }
             if (!ids.add(id)) {
-                reply.accept(ToolArgs.errorJson("Duplicate todo id: " + id));
+                reply.accept(ToolArgs.errorJson(ToolMessages.text("error.duplicate_todo_id_0", id)));
                 return;
             }
             if (!PRIORITIES.contains(priority) || !STATUSES.contains(status)) {
-                reply.accept(ToolArgs.errorJson("Todo item '" + id
-                        + "' has invalid priority or status."));
+                reply.accept(ToolArgs.errorJson(ToolMessages.text("error.todo_item_0_has_invalid_priority_or_status", id)));
                 return;
             }
             List<String> dependencies = new ArrayList<>();
             if (value.has("depends_on") && !value.get("depends_on").isJsonNull()) {
                 JsonArray dependencyValues = ToolArgs.getArray(value, "depends_on");
                 if (dependencyValues == null || dependencyValues.size() > MAX_ITEMS) {
-                    reply.accept(ToolArgs.errorJson("Todo item '" + id
-                            + "' has invalid depends_on."));
+                    reply.accept(ToolArgs.errorJson(ToolMessages.text("error.todo_item_0_has_invalid_depends_on", id)));
                     return;
                 }
                 for (var dependencyValue : dependencyValues) {
                     if (!dependencyValue.isJsonPrimitive()
                             || !dependencyValue.getAsJsonPrimitive().isString()
                             || !validText(dependencyValue.getAsString(), 64)) {
-                        reply.accept(ToolArgs.errorJson("Todo item '" + id
-                                + "' has a non-string dependency."));
+                        reply.accept(ToolArgs.errorJson(ToolMessages.text("error.todo_item_0_has_a_non_string_dependency", id)));
                         return;
                     }
                     dependencies.add(dependencyValue.getAsString());
@@ -154,14 +150,13 @@ public final class TodowriteTool implements Tool {
         if (args.has("constraints") && !args.get("constraints").isJsonNull()) {
             JsonArray values = ToolArgs.getArray(args, "constraints");
             if (values == null || values.size() > MAX_CONSTRAINTS) {
-                reply.accept(ToolArgs.errorJson("'constraints' must contain at most "
-                        + MAX_CONSTRAINTS + " objects."));
+                reply.accept(ToolArgs.errorJson(ToolMessages.text("error.constraints_must_contain_at_most_0_objects", MAX_CONSTRAINTS)));
                 return;
             }
             constraints = new ArrayList<>();
             for (int index = 0; index < values.size(); index++) {
                 if (!values.get(index).isJsonObject()) {
-                    reply.accept(ToolArgs.errorJson("Constraint " + index + " must be an object."));
+                    reply.accept(ToolArgs.errorJson(ToolMessages.text("error.constraint_0_must_be_an_object", index)));
                     return;
                 }
                 JsonObject value = values.get(index).getAsJsonObject();
@@ -171,7 +166,7 @@ public final class TodowriteTool implements Tool {
                 String scope = ToolArgs.getString(value, "scope", "plan");
                 if (!validText(id, 64) || !validText(description, MAX_TEXT_LENGTH)
                         || !("hard".equals(kind) || "preference".equals(kind))) {
-                    reply.accept(ToolArgs.errorJson("Constraint " + index + " is invalid."));
+                    reply.accept(ToolArgs.errorJson(ToolMessages.text("error.constraint_0_is_invalid", index)));
                     return;
                 }
                 constraints.add(new IntentContract.Constraint(id,
@@ -185,15 +180,13 @@ public final class TodowriteTool implements Tool {
         if (args.has("goal_conditions") && !args.get("goal_conditions").isJsonNull()) {
             JsonArray values = ToolArgs.getArray(args, "goal_conditions");
             if (values == null || values.size() > MAX_GOAL_CONDITIONS) {
-                reply.accept(ToolArgs.errorJson("'goal_conditions' must contain at most "
-                        + MAX_GOAL_CONDITIONS + " objects."));
+                reply.accept(ToolArgs.errorJson(ToolMessages.text("error.goal_conditions_must_contain_at_most_0_objects", MAX_GOAL_CONDITIONS)));
                 return;
             }
             goalConditions = new ArrayList<>();
             for (int index = 0; index < values.size(); index++) {
                 if (!values.get(index).isJsonObject()) {
-                    reply.accept(ToolArgs.errorJson("Goal condition " + index
-                            + " must be an object."));
+                    reply.accept(ToolArgs.errorJson(ToolMessages.text("error.goal_condition_0_must_be_an_object", index)));
                     return;
                 }
                 JsonObject value = values.get(index).getAsJsonObject();
@@ -206,8 +199,7 @@ public final class TodowriteTool implements Tool {
                 if (!validText(subject, 256) || !validText(predicate, 128)
                         || !validText(expected, 256) || confidence == null
                         || confidence < 0.0 || confidence > 1.0) {
-                    reply.accept(ToolArgs.errorJson("Goal condition " + index
-                            + " contains invalid fields."));
+                    reply.accept(ToolArgs.errorJson(ToolMessages.text("error.goal_condition_0_contains_invalid_fields", index)));
                     return;
                 }
                 PlanGraph.Comparison parsedComparison;
@@ -215,15 +207,13 @@ public final class TodowriteTool implements Tool {
                     parsedComparison = PlanGraph.Comparison.valueOf(
                             comparison.trim().toUpperCase(Locale.ROOT));
                 } catch (IllegalArgumentException invalidComparison) {
-                    reply.accept(ToolArgs.errorJson("Goal condition " + index
-                            + " has invalid comparison '" + comparison + "'."));
+                    reply.accept(ToolArgs.errorJson(ToolMessages.text("error.goal_condition_0_has_invalid_comparison_1", index, comparison)));
                     return;
                 }
                 if ((parsedComparison == PlanGraph.Comparison.AT_LEAST
                         || parsedComparison == PlanGraph.Comparison.AT_MOST)
                         && !finiteNumber(expected)) {
-                    reply.accept(ToolArgs.errorJson("Goal condition " + index
-                            + " requires a finite numeric value for " + comparison + "."));
+                    reply.accept(ToolArgs.errorJson(ToolMessages.text("error.goal_condition_0_requires_a_finite_numeric_value_for_1", index, comparison)));
                     return;
                 }
                 goalConditions.add(new PlanGraph.GoalCondition(subject, predicate,
@@ -233,7 +223,7 @@ public final class TodowriteTool implements Tool {
 
         var state = MineAgentEngine.getCompanion(player.companionId());
         if (state.isEmpty()) {
-            reply.accept(ToolArgs.errorJson("Companion is no longer active."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.companion_is_no_longer_active")));
             return;
         }
         if (state.get().auction.hasRunningTask()
@@ -241,15 +231,14 @@ public final class TodowriteTool implements Tool {
             // Plan nodes own body/skill outcome bindings. Replacing them while
             // an executor is live would orphan its eventual evidence and can
             // make a failed action verify an unrelated new milestone.
-            reply.accept(ToolArgs.errorJson(
-                    "Cannot update the plan while a body task or skill is running; wait for its terminal result or stop it first."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.cannot_update_the_plan_while_a_body_task_or_skill_is_running_wait_for_its_terminal_result_or_stop_it_first")));
             return;
         }
         String goal = ToolArgs.getString(args, "goal", null);
         String updateMode = ToolArgs.getString(args, "update_mode", "replace")
                 .trim().toLowerCase(Locale.ROOT);
         if (!"replace".equals(updateMode) && !"repair".equals(updateMode)) {
-            reply.accept(ToolArgs.errorJson("'update_mode' must be 'replace' or 'repair'."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.update_mode_must_be_replace_or_repair")));
             return;
         }
         PlanGraph.UpdateResult update = "repair".equals(updateMode)

@@ -1,5 +1,6 @@
 package com.mineagent.tools;
 
+import com.mineagent.tools.i18n.ToolMessages;
 import com.google.gson.JsonObject;
 import com.mineagent.api.agent.tool.Schema;
 import com.mineagent.api.agent.tool.Tool;
@@ -27,25 +28,13 @@ public class LocateBiomeTool implements Tool {
 
     @Override
     public String description() {
-        return """
-            Find the nearest biome of a specified type. Common biomes:
-            - "minecraft:plains" - Plains
-            - "minecraft:desert" - Desert
-            - "minecraft:jungle" - Jungle
-            - "minecraft:taiga" - Taiga
-            - "minecraft:snowy_tundra" - Snowy Tundra
-            - "minecraft:mushroom_fields" - Mushroom Fields
-            - "minecraft:swamp" - Swamp
-            
-            Returns a task_id for tracking. The result will contain the
-            biome's position and distance.
-            """;
+        return ToolMessages.text("locate_biome.description");
     }
 
     @Override
     public Map<String, Object> parameterSchema() {
         return Schema.object()
-                .string("biome_type", "Biome type ID (e.g. 'minecraft:desert')")
+                .string("biome_type", ToolMessages.text("locate_biome.parameter.biome_type"))
                 .build();
     }
 
@@ -54,7 +43,7 @@ public class LocateBiomeTool implements Tool {
                               Consumer<String> reply) {
         String biomeType = ToolArgs.getString(args, "biome_type");
         if (biomeType == null || biomeType.isBlank()) {
-            reply.accept(ToolArgs.errorJson("Missing required parameter 'biome_type'"));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.missing_required_parameter_biome_type")));
             return;
         }
         biomeType = biomeType.trim();
@@ -66,7 +55,7 @@ public class LocateBiomeTool implements Tool {
         // Resolve the biome type
         var biomeResourceLoc = net.minecraft.resources.ResourceLocation.tryParse(biomeType);
         if (biomeResourceLoc == null) {
-            reply.accept(ToolArgs.errorJson("Invalid biome type: " + biomeType));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.invalid_biome_type_0", biomeType)));
             return;
         }
 
@@ -75,8 +64,7 @@ public class LocateBiomeTool implements Tool {
                 net.minecraft.core.registries.Registries.BIOME, biomeResourceLoc);
 
         if (!biomeRegistry.containsKey(biomeKey)) {
-            reply.accept(ToolArgs.errorJson("Biome type '" + biomeType
-                    + "' not found in this world"));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.biome_type_0_not_found_in_this_world", biomeType)));
             return;
         }
 

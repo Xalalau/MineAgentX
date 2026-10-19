@@ -1,5 +1,6 @@
 package com.mineagent.tools.perception;
 
+import com.mineagent.tools.i18n.ToolMessages;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.mineagent.api.agent.tool.Schema;
@@ -31,30 +32,14 @@ public class RecallMemoryTool implements Tool {
 
     @Override
     public String description() {
-        return """
-                Recall places you've discovered. Query by category:
-                - "block:minecraft:iron_ore" — exact observed block ID
-                - "block:modid:block_id" — any observed modded block ID
-                - "block" — all remembered block observations
-                - "structure:village" — villages you've found
-                - "structure:furnace" — furnaces (yours or found)
-                - "hazard:creeper" — where you saw creepers
-                - "hazard:lava" — lava locations
-                - "chest" — chests you've seen
-                - "" (empty) — all nearby points of interest
-
-                Returns locations you can navigate back to.
-                Use this BEFORE exploring new areas — you may already
-                know where to find what you need.
-                """;
+        return ToolMessages.text("recall_memory.description");
     }
 
     @Override
     public Map<String, Object> parameterSchema() {
         return Schema.object()
                 .string("category",
-                        "Category prefix to search (e.g. 'block:minecraft:iron_ore', "
-                        + "'block', 'structure:village', 'hazard:lava'). Empty = all nearby.")
+                        ToolMessages.text("recall_memory.parameter.category"))
                 .build();
     }
 
@@ -65,7 +50,7 @@ public class RecallMemoryTool implements Tool {
 
         var loopOpt = com.mineagent.engine.task.TaskContext.agentLoop(player);
         if (loopOpt == null) {
-            reply.accept("{\"error\":\"agent loop unavailable\"}");
+            reply.accept(com.mineagent.api.agent.tool.ToolArgs.errorJson(ToolMessages.text("error.agent_loop_unavailable")));
             return;
         }
 
@@ -87,8 +72,7 @@ public class RecallMemoryTool implements Tool {
         if (results.isEmpty()) {
             JsonObject result = new JsonObject();
             result.addProperty("found", false);
-            result.addProperty("message", "No memory matches '" + category
-                    + "'. You haven't seen any such location yet.");
+            result.addProperty("message", ToolMessages.text("memory.no_match", category));
             reply.accept(result.toString());
             return;
         }
@@ -112,7 +96,7 @@ public class RecallMemoryTool implements Tool {
         }
         result.add("locations", arr);
         result.addProperty("hint",
-                "Use `goto` to navigate to any of these locations.");
+                ToolMessages.text("memory.navigate"));
         reply.accept(result.toString());
     }
 }

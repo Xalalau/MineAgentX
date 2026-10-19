@@ -1,5 +1,6 @@
 package com.mineagent.tools;
 
+import com.mineagent.tools.i18n.ToolMessages;
 import com.google.gson.JsonObject;
 import com.mineagent.api.agent.tool.Schema;
 import com.mineagent.api.agent.tool.Tool;
@@ -26,26 +27,18 @@ public class InteractAtTool implements Tool {
 
     @Override
     public String description() {
-        return """
-            Interact with a block at a specific world position. Supports:
-            - "use": right-click interaction (open door, open chest, etc.)
-            - "attack": left-click interaction (break block start)
-            - "use_offhand": right-click with off-hand item
-            
-            Optionally specify an item to hold during the interaction.
-            Returns a task_id for tracking.
-            """;
+        return ToolMessages.text("interact_at.description");
     }
 
     @Override
     public Map<String, Object> parameterSchema() {
         return Schema.object()
-                .string("button", "Interaction type: 'use', 'attack', or 'use_offhand'")
-                .integer("x", "Target block X coordinate", Integer.MIN_VALUE, Integer.MAX_VALUE)
-                .integer("y", "Target block Y coordinate", Integer.MIN_VALUE, Integer.MAX_VALUE)
-                .integer("z", "Target block Z coordinate", Integer.MIN_VALUE, Integer.MAX_VALUE)
-                .optionalInteger("hold_ticks", "How long to hold the button (0-40 ticks, default 0)", 0, 40)
-                .optionalString("item_id", "Item ID to hold during interaction (e.g. 'minecraft:flint_and_steel')")
+                .string("button", ToolMessages.text("interact_at.parameter.button"))
+                .integer("x", ToolMessages.text("interact_at.parameter.x"), Integer.MIN_VALUE, Integer.MAX_VALUE)
+                .integer("y", ToolMessages.text("interact_at.parameter.y"), Integer.MIN_VALUE, Integer.MAX_VALUE)
+                .integer("z", ToolMessages.text("interact_at.parameter.z"), Integer.MIN_VALUE, Integer.MAX_VALUE)
+                .optionalInteger("hold_ticks", ToolMessages.text("interact_at.parameter.hold_ticks"), 0, 40)
+                .optionalString("item_id", ToolMessages.text("interact_at.parameter.item_id"))
                 .build();
     }
 
@@ -54,39 +47,38 @@ public class InteractAtTool implements Tool {
                               Consumer<String> reply) {
         String button = ToolArgs.getString(args, "button");
         if (button == null) {
-            reply.accept("{\"error\":\"Missing required parameter 'button'.\"}");
+            reply.accept(com.mineagent.api.agent.tool.ToolArgs.errorJson(ToolMessages.text("error.missing_required_parameter_button")));
             return;
         }
         if (!ToolArgs.has(args, "x") || !ToolArgs.has(args, "y") || !ToolArgs.has(args, "z")) {
-            reply.accept("{\"error\":\"Missing required parameters x, y, z.\"}");
+            reply.accept(com.mineagent.api.agent.tool.ToolArgs.errorJson(ToolMessages.text("error.missing_required_parameters_x_y_z")));
             return;
         }
         Integer x = ToolArgs.getIntOrNull(args, "x");
         Integer y = ToolArgs.getIntOrNull(args, "y");
         Integer z = ToolArgs.getIntOrNull(args, "z");
         if (x == null || y == null || z == null) {
-            reply.accept(ToolArgs.errorJson("Parameters x, y, and z must be exact integers."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.parameters_x_y_and_z_must_be_exact_integers")));
             return;
         }
         Integer holdTicks = ToolArgs.has(args, "hold_ticks")
                 ? ToolArgs.getIntOrNull(args, "hold_ticks") : 0;
         if (holdTicks == null || holdTicks < 0 || holdTicks > 40) {
-            reply.accept(ToolArgs.errorJson("'hold_ticks' must be an integer from 0 to 40."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.hold_ticks_must_be_an_integer_from_0_to_40")));
             return;
         }
         String itemId = ToolArgs.getString(args, "item_id");
 
         // Validate button
         if (!java.util.Set.of("use", "attack", "use_offhand").contains(button)) {
-            reply.accept(ToolArgs.errorJson("Invalid button: " + button
-                    + ". Use 'use', 'attack', or 'use_offhand'."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.invalid_button_0_use_use_attack_or_use_offhand", button)));
             return;
         }
 
         var sp = ((com.mineagent.engine.entity.CompanionEntity) player).serverPlayer();
         var target = new net.minecraft.core.BlockPos(x, y, z);
         if (!sp.level().isInWorldBounds(target)) {
-            reply.accept(ToolArgs.errorJson("Target block is outside this dimension's world bounds."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.target_block_is_outside_this_dimension_s_world_bounds")));
             return;
         }
         if (!sp.level().isLoaded(target)) {
@@ -96,18 +88,17 @@ public class InteractAtTool implements Tool {
             // stale navigation assumptions). Require the caller to navigate
             // into a loaded area first, matching vanilla's local interaction
             // semantics.
-            reply.accept(ToolArgs.errorJson(
-                    "Target block is in an unloaded chunk; move closer before interacting."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.target_block_is_in_an_unloaded_chunk_move_closer_before_interacting")));
             return;
         }
         if (sp.level().getBlockState(target).isAir()) {
-            reply.accept(ToolArgs.errorJson("Target block is air at " + target.toShortString()));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.target_block_is_air_at_0", target.toShortString())));
             return;
         }
         if (itemId != null) {
             var id = net.minecraft.resources.ResourceLocation.tryParse(itemId);
             if (id == null || !net.minecraft.core.registries.BuiltInRegistries.ITEM.containsKey(id)) {
-                reply.accept(ToolArgs.errorJson("Unknown item: " + itemId));
+                reply.accept(ToolArgs.errorJson(ToolMessages.text("error.unknown_item", itemId)));
                 return;
             }
             itemId = id.toString();

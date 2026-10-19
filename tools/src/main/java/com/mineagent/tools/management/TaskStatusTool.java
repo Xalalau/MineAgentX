@@ -1,5 +1,6 @@
 package com.mineagent.tools.management;
 
+import com.mineagent.tools.i18n.ToolMessages;
 import com.google.gson.JsonObject;
 import com.mineagent.api.agent.tool.Schema;
 import com.mineagent.api.agent.tool.Tool;
@@ -27,13 +28,13 @@ public class TaskStatusTool implements Tool {
 
     @Override
     public String description() {
-        return "Check an asynchronous task by the task_id returned by its action tool.";
+        return ToolMessages.text("task_status.description");
     }
 
     @Override
     public Map<String, Object> parameterSchema() {
         return Schema.object()
-                .string("task_id", "The task ID returned by an async tool call")
+                .string("task_id", ToolMessages.text("task_status.parameter.task_id"))
                 .build();
     }
 
@@ -42,7 +43,7 @@ public class TaskStatusTool implements Tool {
                              Consumer<String> reply) {
         String taskId = ToolArgs.getString(args, "task_id");
         if (taskId == null || taskId.isBlank()) {
-            reply.accept(ToolArgs.errorJson("Missing required parameter 'task_id'."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.missing_required_parameter_task_id")));
             return;
         }
 
@@ -51,8 +52,7 @@ public class TaskStatusTool implements Tool {
         // part of the key to prevent cross-companion status disclosure.
         TaskInfo info = TASK_INFO.get(key(player.companionId(), taskId));
         if (info == null) {
-            reply.accept(ToolArgs.errorJson("Task '" + taskId
-                    + "' not found. It may have expired or never existed."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.task_0_not_found_it_may_have_expired_or_never_existed", taskId)));
             return;
         }
 

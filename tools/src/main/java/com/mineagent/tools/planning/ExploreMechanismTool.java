@@ -1,5 +1,6 @@
 package com.mineagent.tools.planning;
 
+import com.mineagent.tools.i18n.ToolMessages;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -19,32 +20,29 @@ public final class ExploreMechanismTool implements Tool {
     @Override public String name() { return "explore_mechanism"; }
 
     @Override public String description() {
-        return "Propose, rank, inspect, or abort a budgeted experiment for an unfamiliar "
-                + "block, item, GUI, recipe, or mod rule. State-changing probes require "
-                + "an explicit reversible compensation. Rules need two independent "
-                + "supporting contexts before they become reusable verified adapters.";
+        return ToolMessages.text("explore_mechanism.description");
     }
 
     @Override public Map<String, Object> parameterSchema() {
         return Schema.object()
-                .string("mode", "propose, recommend, status, or abort")
-                .optionalString("experiment_id", "Experiment ID for status or abort")
-                .optionalString("subject", "Registered ID or concise identity of the unfamiliar mechanism")
-                .optionalString("hypothesis", "One falsifiable behavior hypothesis")
-                .optionalString("probe_tool", "Existing safe tool to call exactly once after proposal")
-                .optionalString("probe_arguments", "JSON arguments intended for the probe tool")
-                .optionalString("expected_subject", "Semantic fact subject expected after the probe, e.g. tool:inspect_gui, inventory:mod:item, or profile:menu:mod:machine")
-                .optionalString("expected_predicate", "Semantic predicate such as outcome, result.menu_type, count, or attribute.slot.0.occupied")
-                .optionalString("expected_value", "Expected semantic value; use * only when existence is sufficient")
-                .optionalString("context", "Independent setup identity, e.g. dimension+position+input configuration")
-                .optionalString("risk", "low, medium, or high; high is always rejected")
-                .optionalBoolean("reversible", "Whether the exact pre-probe state can be restored")
-                .optionalString("compensation_tool", "Allowlisted compensation tool required for a state-changing probe; this is not a generic transaction rollback")
-                .optionalString("compensation_arguments", "JSON arguments for the compensation tool")
-                .optionalInteger("estimated_cost", "Budget units consumed by this probe", 1, 12)
-                .nullableNumber("information_gain", "Expected uncertainty reduction from 0 to 1")
-                .optionalString("candidate_probes", "For recommend: JSON array of candidate probe objects")
-                .optionalString("reason", "Abort reason")
+                .string("mode", ToolMessages.text("explore_mechanism.parameter.mode"))
+                .optionalString("experiment_id", ToolMessages.text("explore_mechanism.parameter.experiment_id"))
+                .optionalString("subject", ToolMessages.text("explore_mechanism.parameter.subject"))
+                .optionalString("hypothesis", ToolMessages.text("explore_mechanism.parameter.hypothesis"))
+                .optionalString("probe_tool", ToolMessages.text("explore_mechanism.parameter.probe_tool"))
+                .optionalString("probe_arguments", ToolMessages.text("explore_mechanism.parameter.probe_arguments"))
+                .optionalString("expected_subject", ToolMessages.text("explore_mechanism.parameter.expected_subject"))
+                .optionalString("expected_predicate", ToolMessages.text("explore_mechanism.parameter.expected_predicate"))
+                .optionalString("expected_value", ToolMessages.text("explore_mechanism.parameter.expected_value"))
+                .optionalString("context", ToolMessages.text("explore_mechanism.parameter.context"))
+                .optionalString("risk", ToolMessages.text("explore_mechanism.parameter.risk"))
+                .optionalBoolean("reversible", ToolMessages.text("explore_mechanism.parameter.reversible"))
+                .optionalString("compensation_tool", ToolMessages.text("explore_mechanism.parameter.compensation_tool"))
+                .optionalString("compensation_arguments", ToolMessages.text("explore_mechanism.parameter.compensation_arguments"))
+                .optionalInteger("estimated_cost", ToolMessages.text("explore_mechanism.parameter.estimated_cost"), 1, 12)
+                .nullableNumber("information_gain", ToolMessages.text("explore_mechanism.parameter.information_gain"))
+                .optionalString("candidate_probes", ToolMessages.text("explore_mechanism.parameter.candidate_probes"))
+                .optionalString("reason", ToolMessages.text("explore_mechanism.parameter.reason"))
                 .build();
     }
 
@@ -53,7 +51,7 @@ public final class ExploreMechanismTool implements Tool {
                              Consumer<String> reply) {
         var loop = TaskContext.agentLoop(player);
         if (loop == null) {
-            reply.accept(ToolArgs.errorJson("Agent loop is unavailable."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.agent_loop_is_unavailable")));
             return;
         }
         String mode = ToolArgs.getString(args, "mode", "status")
@@ -62,7 +60,7 @@ public final class ExploreMechanismTool implements Tool {
         try {
             gameTick = TaskContext.serverPlayer(player).level().getGameTime();
         } catch (RuntimeException unavailable) {
-            reply.accept(ToolArgs.errorJson("Live server state is unavailable."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.live_server_state_is_unavailable")));
             return;
         }
         switch (mode) {
@@ -71,16 +69,15 @@ public final class ExploreMechanismTool implements Tool {
             case "abort" -> {
                 boolean aborted = loop.mechanismExplorer().abort(
                         ToolArgs.getString(args, "experiment_id", null),
-                        ToolArgs.getString(args, "reason", "aborted by planner"), gameTick);
+                        ToolArgs.getString(args, "reason", ToolMessages.text("experiment.aborted")), gameTick);
                 JsonObject result = new JsonObject();
                 result.addProperty("success", aborted);
-                if (!aborted) result.addProperty("error", "No active matching experiment.");
+                if (!aborted) result.addProperty("error", ToolMessages.text("experiment.not_found"));
                 reply.accept(result.toString());
             }
             case "status" -> status(loop.mechanismExplorer(),
                     ToolArgs.getString(args, "experiment_id", null), reply);
-            default -> reply.accept(ToolArgs.errorJson(
-                    "mode must be propose, recommend, status, or abort."));
+            default -> reply.accept(ToolArgs.errorJson(ToolMessages.text("error.mode_must_be_propose_recommend_status_or_abort")));
         }
     }
 
@@ -90,8 +87,7 @@ public final class ExploreMechanismTool implements Tool {
         String hypothesis = ToolArgs.getString(args, "hypothesis");
         String probeTool = ToolArgs.getString(args, "probe_tool");
         if (subject == null || hypothesis == null || probeTool == null) {
-            reply.accept(ToolArgs.errorJson(
-                    "propose requires subject, hypothesis, and probe_tool."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.propose_requires_subject_hypothesis_and_probe_tool")));
             return;
         }
         MechanismExplorer.Risk risk = parseRisk(ToolArgs.getString(args, "risk", "low"));
@@ -123,8 +119,7 @@ public final class ExploreMechanismTool implements Tool {
         String subject = ToolArgs.getString(args, "subject");
         JsonArray values = ToolArgs.getArray(args, "candidate_probes");
         if (subject == null || values == null || values.isEmpty() || values.size() > 12) {
-            reply.accept(ToolArgs.errorJson(
-                    "recommend requires subject and 1-12 candidate_probes."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.recommend_requires_subject_and_1_12_candidate_probes")));
             return;
         }
         java.util.ArrayList<MechanismExplorer.ProbeCandidate> candidates = new java.util.ArrayList<>();
@@ -172,7 +167,7 @@ public final class ExploreMechanismTool implements Tool {
         if (experimentId != null) {
             var experiment = explorer.get(experimentId);
             if (experiment == null) {
-                reply.accept(ToolArgs.errorJson("Unknown experiment: " + experimentId));
+                reply.accept(ToolArgs.errorJson(ToolMessages.text("error.unknown_experiment_0", experimentId)));
                 return;
             }
             result.add("experiment", json(experiment));

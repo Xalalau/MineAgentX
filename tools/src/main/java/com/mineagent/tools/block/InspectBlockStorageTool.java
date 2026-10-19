@@ -1,5 +1,6 @@
 package com.mineagent.tools.block;
 
+import com.mineagent.tools.i18n.ToolMessages;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.mineagent.api.agent.tool.Schema;
@@ -23,15 +24,15 @@ public class InspectBlockStorageTool implements Tool {
 
     @Override
     public String description() {
-        return "Inspect item slots in a nearby loaded container block without moving items.";
+        return ToolMessages.text("inspect_block_storage.description");
     }
 
     @Override
     public Map<String, Object> parameterSchema() {
         return Schema.object()
-                .integer("x", "Container block X coordinate", -30_000_000, 30_000_000)
-                .integer("y", "Container block Y coordinate", Integer.MIN_VALUE, Integer.MAX_VALUE)
-                .integer("z", "Container block Z coordinate", -30_000_000, 30_000_000)
+                .integer("x", ToolMessages.text("inspect_block_storage.parameter.x"), -30_000_000, 30_000_000)
+                .integer("y", ToolMessages.text("inspect_block_storage.parameter.y"), Integer.MIN_VALUE, Integer.MAX_VALUE)
+                .integer("z", ToolMessages.text("inspect_block_storage.parameter.z"), -30_000_000, 30_000_000)
                 .build();
     }
 
@@ -42,7 +43,7 @@ public class InspectBlockStorageTool implements Tool {
         Integer y = ToolArgs.getIntOrNull(args, "y");
         Integer z = ToolArgs.getIntOrNull(args, "z");
         if (x == null || y == null || z == null) {
-            reply.accept(ToolArgs.errorJson("Parameters x, y, and z must be exact integers."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.parameters_x_y_and_z_must_be_exact_integers")));
             return;
         }
 
@@ -50,7 +51,7 @@ public class InspectBlockStorageTool implements Tool {
         var level = sp.level();
         var pos = new net.minecraft.core.BlockPos(x, y, z);
         if (!level.isInWorldBounds(pos) || !level.isLoaded(pos)) {
-            reply.accept(ToolArgs.errorJson("Container position is outside the loaded world."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.container_position_is_outside_the_loaded_world")));
             return;
         }
         if (BlockTargeting.findVisibleHit(sp, pos,
@@ -60,16 +61,14 @@ public class InspectBlockStorageTool implements Tool {
             // outline ray test as placement/use/breaking so inspection cannot
             // become an x-ray read path and the model receives honest
             // visibility evidence.
-            reply.accept(ToolArgs.errorJson(
-                    "Container is outside interaction range or is blocked from view."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.container_is_outside_interaction_range_or_is_blocked_from_view")));
             return;
         }
 
         var state = level.getBlockState(pos);
         var blockEntity = level.getBlockEntity(pos);
         if (!(blockEntity instanceof net.minecraft.world.Container container)) {
-            reply.accept(ToolArgs.errorJson("Block at " + pos.toShortString()
-                    + " is not an item container."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.block_at_0_is_not_an_item_container", pos.toShortString())));
             return;
         }
 

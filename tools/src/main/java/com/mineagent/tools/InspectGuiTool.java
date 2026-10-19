@@ -1,5 +1,6 @@
 package com.mineagent.tools;
 
+import com.mineagent.tools.i18n.ToolMessages;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.mineagent.api.agent.tool.Schema;
@@ -18,7 +19,7 @@ public class InspectGuiTool implements Tool {
     private static final int MAX_OBSERVED_SLOTS = 96;
     @Override public String name() { return "inspect_gui"; }
     @Override public String description() {
-        return "Read item slots in the currently open chest, furnace, crafting, or other container menu.";
+        return ToolMessages.text("inspect_gui.description");
     }
     @Override public Map<String, Object> parameterSchema() { return Schema.none(); }
 
@@ -31,7 +32,7 @@ public class InspectGuiTool implements Tool {
             // containerMenu normally points at inventoryMenu when no screen is
             // open; a null-only check incorrectly reported the player inventory
             // as an open container.
-            reply.accept(ToolArgs.errorJson("No container GUI is currently open."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.no_container_gui_is_currently_open")));
             return;
         }
 
@@ -89,7 +90,7 @@ public class InspectGuiTool implements Tool {
         result.addProperty("observed_slots", slots.size());
         result.addProperty("slots_truncated", slots.size() >= MAX_OBSERVED_SLOTS);
         result.addProperty("slot_addressing",
-                "Use 'slot' for endpoint=container and 'inventory_slot' for endpoint=player");
+                ToolMessages.text("output.slot_addressing"));
         reply.accept(result.toString());
     }
 }

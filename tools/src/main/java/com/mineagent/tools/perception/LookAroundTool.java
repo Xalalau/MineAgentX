@@ -1,5 +1,6 @@
 package com.mineagent.tools.perception;
 
+import com.mineagent.tools.i18n.ToolMessages;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -42,18 +43,13 @@ public final class LookAroundTool implements Tool {
 
     @Override
     public String description() {
-        return """
-                Observe the current server world as structured JSON. Returns
-                self state, immediate threats, nearby living entities, a
-                vertical profile, notable 3-D blocks, and a compact local map.
-                Use this before acting when the environment is uncertain.
-                """;
+        return ToolMessages.text("look_around.description");
     }
 
     @Override
     public Map<String, Object> parameterSchema() {
         return Schema.object()
-                .optionalInteger("radius", "Observation radius in blocks (4-16, default 8)", 4, 16)
+                .optionalInteger("radius", ToolMessages.text("look_around.parameter.radius"), 4, 16)
                 .build();
     }
 
@@ -63,7 +59,7 @@ public final class LookAroundTool implements Tool {
         Integer radius = ToolArgs.has(args, "radius")
                 ? ToolArgs.getIntOrNull(args, "radius") : 8;
         if (radius == null || radius < 4 || radius > 16) {
-            reply.accept(ToolArgs.errorJson("'radius' must be an integer from 4 to 16."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.radius_must_be_an_integer_from_4_to_16")));
             return;
         }
         reply.accept(generatePerception(agent, radius));
@@ -422,11 +418,11 @@ public final class LookAroundTool implements Tool {
             rows.add(row.toString());
         }
         JsonObject map = new JsonObject();
-        map.addProperty("orientation", "north(-Z) to south(+Z)");
+        map.addProperty("orientation", ToolMessages.text("map.orientation"));
         map.addProperty("radius", radius);
         map.add("rows", rows);
         map.addProperty("legend",
-                "@ self, . open, ^ raised, , one-down, v drop, # blocked, ~ water, L lava, ! hazard, T log, I/C/D/G/R/E/B/Q/N ores");
+                ToolMessages.text("map.legend"));
         return map;
     }
 

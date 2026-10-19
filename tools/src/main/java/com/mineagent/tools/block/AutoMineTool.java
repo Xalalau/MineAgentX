@@ -1,5 +1,6 @@
 package com.mineagent.tools.block;
 
+import com.mineagent.tools.i18n.ToolMessages;
 import com.google.gson.JsonObject;
 import com.mineagent.api.agent.tool.Schema;
 import com.mineagent.api.agent.tool.Tool;
@@ -31,22 +32,15 @@ public class AutoMineTool implements Tool {
 
     @Override
     public String description() {
-        return """
-            Mine blocks of a specified type and quantity. The companion will
-            navigate to and break matching blocks until the desired count is
-            collected or no more are reachable within range.
-            
-            Returns a task_id for tracking. The companion will pick up dropped
-            items automatically.
-            """;
+        return ToolMessages.text("auto_mine.description");
     }
 
     @Override
     public Map<String, Object> parameterSchema() {
         return Schema.object()
-                .string("block_type", "Block ID to mine (e.g. 'minecraft:iron_ore', 'minecraft:oak_log')")
-                .integer("count", "Number of blocks to mine (1-64)", 1, 64)
-                .optionalInteger("radius", "Search radius in blocks (1-32, default 16)", 1, 32)
+                .string("block_type", ToolMessages.text("auto_mine.parameter.block_type"))
+                .integer("count", ToolMessages.text("auto_mine.parameter.count"), 1, 64)
+                .optionalInteger("radius", ToolMessages.text("auto_mine.parameter.radius"), 1, 32)
                 .build();
     }
 
@@ -55,18 +49,18 @@ public class AutoMineTool implements Tool {
                               Consumer<String> reply) {
         String blockType = ToolArgs.getString(args, "block_type");
         if (blockType == null) {
-            reply.accept("{\"error\":\"Missing required parameter 'block_type'.\"}");
+            reply.accept(com.mineagent.api.agent.tool.ToolArgs.errorJson(ToolMessages.text("error.missing_required_parameter_block_type")));
             return;
         }
         if (!ToolArgs.has(args, "count")) {
-            reply.accept("{\"error\":\"Missing required parameter 'count'.\"}");
+            reply.accept(com.mineagent.api.agent.tool.ToolArgs.errorJson(ToolMessages.text("error.missing_required_parameter_count")));
             return;
         }
         boolean tagQuery = blockType.startsWith("#");
         ResourceLocation blockId = ResourceLocation.tryParse(
                 tagQuery ? blockType.substring(1) : blockType);
         if (blockId == null || (!tagQuery && !BuiltInRegistries.BLOCK.containsKey(blockId))) {
-            reply.accept(ToolArgs.errorJson("Unknown block or invalid block tag: " + blockType));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.unknown_block_or_invalid_block_tag_0", blockType)));
             return;
         }
         if (tagQuery) {
@@ -75,7 +69,7 @@ public class AutoMineTool implements Tool {
             // An empty tag can never produce a target. Checking it here avoids
             // launching an expensive radius scan that is guaranteed to fail.
             if (BuiltInRegistries.BLOCK.getTag(tag).isEmpty()) {
-                reply.accept(ToolArgs.errorJson("Unknown or empty block tag: #" + blockId));
+                reply.accept(ToolArgs.errorJson(ToolMessages.text("error.unknown_or_empty_block_tag_0", blockId)));
                 return;
             }
             blockType = "#" + blockId;
@@ -85,13 +79,13 @@ public class AutoMineTool implements Tool {
 
         Integer count = ToolArgs.getIntOrNull(args, "count");
         if (count == null || count < 1 || count > 64) {
-            reply.accept(ToolArgs.errorJson("'count' must be an integer from 1 to 64."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.count_must_be_an_integer_from_1_to_64")));
             return;
         }
         Integer radius = ToolArgs.has(args, "radius")
                 ? ToolArgs.getIntOrNull(args, "radius") : 16;
         if (radius == null || radius < 1 || radius > 32) {
-            reply.accept(ToolArgs.errorJson("'radius' must be an integer from 1 to 32."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.radius_must_be_an_integer_from_1_to_32")));
             return;
         }
 

@@ -1,5 +1,6 @@
 package com.mineagent.tools;
 
+import com.mineagent.tools.i18n.ToolMessages;
 import com.google.gson.JsonObject;
 import com.mineagent.api.agent.tool.Schema;
 import com.mineagent.api.agent.tool.Tool;
@@ -13,7 +14,7 @@ import java.util.function.Consumer;
 public class GetWorldInfoTool implements Tool {
     @Override public String name() { return "get_world_info"; }
     @Override public String description() {
-        return "Get current dimension, time, weather, difficulty, relevant game rules, and spawn position.";
+        return ToolMessages.text("get_world_info.description");
     }
     @Override public Map<String, Object> parameterSchema() { return Schema.none(); }
 

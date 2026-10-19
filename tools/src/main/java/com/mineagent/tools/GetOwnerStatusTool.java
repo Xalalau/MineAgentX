@@ -1,5 +1,6 @@
 package com.mineagent.tools;
 
+import com.mineagent.tools.i18n.ToolMessages;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.mineagent.api.agent.tool.Schema;
@@ -15,7 +16,7 @@ import java.util.function.Consumer;
 public class GetOwnerStatusTool implements Tool {
     @Override public String name() { return "get_owner_status"; }
     @Override public String description() {
-        return "Get the online owner's health, food, position, game mode, experience, and active effects.";
+        return ToolMessages.text("get_owner_status.description");
     }
     @Override public Map<String, Object> parameterSchema() { return Schema.none(); }
 
@@ -26,7 +27,7 @@ public class GetOwnerStatusTool implements Tool {
         if (owner == null || owner.hasDisconnected()) {
             // Companions can survive owner dimension changes and disconnect
             // windows; status queries must not dereference a stale owner.
-            reply.accept(ToolArgs.errorJson("The companion owner is currently offline."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.the_companion_owner_is_currently_offline")));
             return;
         }
 

@@ -1,5 +1,6 @@
 package com.mineagent.tools.management;
 
+import com.mineagent.tools.i18n.ToolMessages;
 import com.google.gson.JsonObject;
 import com.mineagent.api.agent.tool.Schema;
 import com.mineagent.api.agent.tool.Tool;
@@ -24,17 +25,13 @@ public class TaskStopTool implements Tool {
 
     @Override
     public String description() {
-        return """
-            Cancel a running task by its task_id. The task will be
-            interrupted on the next server tick. Use task_status to
-            verify the task was cancelled.
-            """;
+        return ToolMessages.text("task_stop.description");
     }
 
     @Override
     public Map<String, Object> parameterSchema() {
         return Schema.object()
-                .string("task_id", "The task ID to cancel")
+                .string("task_id", ToolMessages.text("task_stop.parameter.task_id"))
                 .build();
     }
 
@@ -43,21 +40,20 @@ public class TaskStopTool implements Tool {
                               Consumer<String> reply) {
         String taskId = ToolArgs.getString(args, "task_id");
         if (taskId == null || taskId.isBlank()) {
-            reply.accept(ToolArgs.errorJson("Missing required parameter 'task_id'."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.missing_required_parameter_task_id")));
             return;
         }
 
         // Check if the task exists in TaskStatusTool's tracking
         var taskInfo = TaskStatusTool.getTaskInfo(player.companionId(), taskId);
         if (taskInfo == null) {
-            reply.accept(ToolArgs.errorJson("Task '" + taskId + "' not found."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.task_0_not_found", taskId)));
             return;
         }
 
         if (taskInfo.state == TaskState.SUCCESS || taskInfo.state == TaskState.FAILED
                 || taskInfo.state == TaskState.CANCELLED) {
-            reply.accept(ToolArgs.errorJson("Task '" + taskId + "' is already "
-                    + taskInfo.state.name() + "."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.task_0_is_already_1", taskId, taskInfo.state.name())));
             return;
         }
 
@@ -68,7 +64,7 @@ public class TaskStopTool implements Tool {
         // the loop is the caller of this tool and is waiting for our reply.
         var stateOpt = com.mineagent.engine.MineAgentEngine.getCompanion(player.companionId());
         if (stateOpt.isEmpty() || !stateOpt.get().auction.cancelTask(taskId)) {
-            reply.accept(ToolArgs.errorJson("Task '" + taskId + "' is no longer active."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.task_0_is_no_longer_active", taskId)));
             return;
         }
 

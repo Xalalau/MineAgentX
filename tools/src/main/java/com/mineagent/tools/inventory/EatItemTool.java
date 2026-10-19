@@ -1,5 +1,6 @@
 package com.mineagent.tools.inventory;
 
+import com.mineagent.tools.i18n.ToolMessages;
 import com.google.gson.JsonObject;
 import com.mineagent.api.agent.tool.Schema;
 import com.mineagent.api.agent.tool.Tool;
@@ -20,17 +21,13 @@ public class EatItemTool implements Tool {
 
     @Override
     public String description() {
-        return """
-            Eat one food item from inventory using its normal use duration.
-            If item_id is omitted, the best available safe food is selected.
-            Returns a task_id because eating can be interrupted before it ends.
-            """;
+        return ToolMessages.text("eat_item.description");
     }
 
     @Override
     public Map<String, Object> parameterSchema() {
         return Schema.object()
-                .optionalString("item_id", "Food item ID to eat (e.g. 'minecraft:cooked_beef'); omit to choose automatically")
+                .optionalString("item_id", ToolMessages.text("eat_item.parameter.item_id"))
                 .build();
     }
 
@@ -42,7 +39,7 @@ public class EatItemTool implements Tool {
             var id = net.minecraft.resources.ResourceLocation.tryParse(itemId);
             if (id == null
                     || !net.minecraft.core.registries.BuiltInRegistries.ITEM.containsKey(id)) {
-                reply.accept(ToolArgs.errorJson("Unknown item: " + itemId));
+                reply.accept(ToolArgs.errorJson(ToolMessages.text("error.unknown_item", itemId)));
                 return;
             }
             itemId = id.toString();

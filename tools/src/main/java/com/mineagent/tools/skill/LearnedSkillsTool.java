@@ -1,5 +1,6 @@
 package com.mineagent.tools.skill;
 
+import com.mineagent.tools.i18n.ToolMessages;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.mineagent.api.agent.tool.Schema;
@@ -35,22 +36,14 @@ public class LearnedSkillsTool implements Tool {
 
     @Override
     public String description() {
-        return """
-                List skills you've learned from past successful actions.
-                Each skill is a reusable action sequence recorded when you
-                completed a task successfully. Call this when starting a
-                task — you may already know how to do it.
-
-                Returns skill names, descriptions, and success rates.
-                High success-rate skills (>70%) are reliable; reuse them.
-                """;
+        return ToolMessages.text("list_learned_skills.description");
     }
 
     @Override
     public Map<String, Object> parameterSchema() {
         return Schema.object()
                 .optionalString("query",
-                        "Current objective; returns only the most relevant learned skills")
+                        ToolMessages.text("list_learned_skills.parameter.query"))
                 .build();
     }
 
@@ -59,7 +52,7 @@ public class LearnedSkillsTool implements Tool {
                               Consumer<String> reply) {
         var loop = TaskContext.agentLoop(player);
         if (loop == null) {
-            reply.accept("{\"error\":\"agent loop unavailable\"}");
+            reply.accept(com.mineagent.api.agent.tool.ToolArgs.errorJson(ToolMessages.text("error.agent_loop_unavailable")));
             return;
         }
 
@@ -71,8 +64,8 @@ public class LearnedSkillsTool implements Tool {
             JsonObject result = new JsonObject();
             result.addProperty("count", 0);
             result.addProperty("message", skillLib.size() == 0
-                    ? "No verified action skills have been learned yet."
-                    : "No reliable learned skill matches this objective.");
+                    ? ToolMessages.text("skills.none")
+                    : ToolMessages.text("skills.no_match"));
             reply.accept(result.toString());
             return;
         }
@@ -93,9 +86,7 @@ public class LearnedSkillsTool implements Tool {
         }
         result.add("skills", arr);
         result.addProperty("hint",
-                "Call execute_skill with the exact skill name. The closed-loop "
-                + "runtime dispatches one step at a time and verifies executor "
-                + "outcomes before continuing.");
+                ToolMessages.text("skills.execute_hint"));
         reply.accept(result.toString());
     }
 }

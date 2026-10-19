@@ -1,5 +1,6 @@
 package com.mineagent.tools;
 
+import com.mineagent.tools.i18n.ToolMessages;
 import com.google.gson.JsonObject;
 import com.mineagent.api.agent.tool.Schema;
 import com.mineagent.api.agent.tool.Tool;
@@ -27,26 +28,13 @@ public class LocateStructureTool implements Tool {
 
     @Override
     public String description() {
-        return """
-            Find the nearest structure of a specified type. Common structures:
-            - "#minecraft:village" - Any village variant (tag)
-            - "minecraft:fortress" - Nether fortresses
-            - "minecraft:end_city" - End cities
-            - "minecraft:mansion" - Woodland mansions
-            - "minecraft:stronghold" - Strongholds
-            - "#minecraft:mineshaft" - Any mineshaft variant (tag)
-            - "minecraft:pillager_outpost" - Pillager outposts
-            - "minecraft:ancient_city" - Ancient cities
-            
-            Returns a task_id for tracking. The result will contain the
-            structure's position and distance.
-            """;
+        return ToolMessages.text("locate_structure.description");
     }
 
     @Override
     public Map<String, Object> parameterSchema() {
         return Schema.object()
-                .string("structure_type", "Structure ID or #tag (e.g. 'minecraft:fortress' or '#minecraft:village')")
+                .string("structure_type", ToolMessages.text("locate_structure.parameter.structure_type"))
                 .build();
     }
 
@@ -55,7 +43,7 @@ public class LocateStructureTool implements Tool {
                               Consumer<String> reply) {
         String structureType = ToolArgs.getString(args, "structure_type");
         if (structureType == null || structureType.isBlank()) {
-            reply.accept(ToolArgs.errorJson("Missing required parameter 'structure_type'"));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.missing_required_parameter_structure_type")));
             return;
         }
         structureType = structureType.trim();
@@ -69,7 +57,7 @@ public class LocateStructureTool implements Tool {
         var structureResourceLoc = net.minecraft.resources.ResourceLocation.tryParse(
                 tagRequest ? structureType.substring(1) : structureType);
         if (structureResourceLoc == null) {
-            reply.accept(ToolArgs.errorJson("Invalid structure type: " + structureType));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.invalid_structure_type_0", structureType)));
             return;
         }
 
@@ -82,8 +70,7 @@ public class LocateStructureTool implements Tool {
                         net.minecraft.core.registries.Registries.STRUCTURE,
                         structureResourceLoc)).isPresent();
         if (!exists) {
-            reply.accept(ToolArgs.errorJson("Structure type '" + structureType
-                    + "' not found in this world"));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.structure_type_0_not_found_in_this_world", structureType)));
             return;
         }
 

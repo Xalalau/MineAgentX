@@ -1,5 +1,6 @@
 package com.mineagent.tools.skill;
 
+import com.mineagent.tools.i18n.ToolMessages;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.mineagent.api.agent.tool.Schema;
@@ -16,17 +17,14 @@ public final class ExecuteSkillTool implements Tool {
     @Override public String name() { return "execute_skill"; }
 
     @Override public String description() {
-        return "Execute a learned skill autonomously, one verified step at a time. "
-                + "Use optional overrides_json such as {\"0\":{\"x\":10}} to adapt "
-                + "stored step arguments. The runtime stops and requests replanning if a "
-                + "precondition, task result, or declared postcondition fails.";
+        return ToolMessages.text("execute_skill.description");
     }
 
     @Override public Map<String, Object> parameterSchema() {
         return Schema.object()
-                .string("skill_name", "Exact learned skill name")
+                .string("skill_name", ToolMessages.text("execute_skill.parameter.skill_name"))
                 .optionalString("overrides_json",
-                        "Optional JSON object keyed by zero-based step index; each value patches that step's arguments")
+                        ToolMessages.text("execute_skill.parameter.overrides_json"))
                 .build();
     }
 
@@ -38,7 +36,7 @@ public final class ExecuteSkillTool implements Tool {
                              Consumer<String> reply) {
         String skillName = ToolArgs.getString(args, "skill_name");
         if (skillName == null || skillName.isBlank()) {
-            reply.accept(ToolArgs.errorJson("Missing required parameter 'skill_name'."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.missing_required_parameter_skill_name")));
             return;
         }
         JsonObject overrides = null;
@@ -47,19 +45,18 @@ public final class ExecuteSkillTool implements Tool {
             try {
                 var parsed = JsonParser.parseString(overrideText);
                 if (!parsed.isJsonObject()) {
-                    reply.accept(ToolArgs.errorJson("overrides_json must encode an object."));
+                    reply.accept(ToolArgs.errorJson(ToolMessages.text("error.overrides_json_must_encode_an_object")));
                     return;
                 }
                 overrides = parsed.getAsJsonObject();
             } catch (RuntimeException malformed) {
-                reply.accept(ToolArgs.errorJson("Invalid overrides_json: "
-                        + malformed.getMessage()));
+                reply.accept(ToolArgs.errorJson(ToolMessages.text("error.invalid_overrides_json_0", String.valueOf(malformed.getMessage()))));
                 return;
             }
         }
         var loop = TaskContext.agentLoop(player);
         if (loop == null) {
-            reply.accept(ToolArgs.errorJson("Agent loop is unavailable."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.agent_loop_is_unavailable")));
             return;
         }
         var result = loop.startSkill(skillName, overrides);

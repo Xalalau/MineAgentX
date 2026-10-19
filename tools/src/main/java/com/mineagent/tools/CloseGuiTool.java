@@ -1,5 +1,6 @@
 package com.mineagent.tools;
 
+import com.mineagent.tools.i18n.ToolMessages;
 import com.google.gson.JsonObject;
 import com.mineagent.api.agent.tool.Schema;
 import com.mineagent.api.agent.tool.Tool;
@@ -22,10 +23,7 @@ public class CloseGuiTool implements Tool {
 
     @Override
     public String description() {
-        return """
-            Close the currently open container GUI (chest, furnace, crafting
-            table, etc.). If no container is open, this does nothing.
-            """;
+        return ToolMessages.text("close_gui.description");
     }
 
     @Override
@@ -42,14 +40,14 @@ public class CloseGuiTool implements Tool {
             sp.closeContainer();
             JsonObject result = new JsonObject();
             result.addProperty("success", true);
-            result.addProperty("message", "Container GUI closed.");
+            result.addProperty("message", ToolMessages.text("output.container_closed"));
             result.addProperty("postcondition_verified",
                     sp.containerMenu == sp.inventoryMenu);
             reply.accept(result.toString());
         } else {
             JsonObject result = new JsonObject();
             result.addProperty("success", true);
-            result.addProperty("message", "No container GUI was open.");
+            result.addProperty("message", ToolMessages.text("output.container_not_open"));
             // Idempotent success is still grounded in the current menu object.
             result.addProperty("postcondition_verified", true);
             reply.accept(result.toString());

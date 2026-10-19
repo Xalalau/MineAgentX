@@ -1,5 +1,6 @@
 package com.mineagent.tools.block;
 
+import com.mineagent.tools.i18n.ToolMessages;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.mineagent.api.agent.tool.Schema;
@@ -27,23 +28,15 @@ public class BuildTool implements Tool {
 
     @Override
     public String description() {
-        return """
-            Place or clear blocks at specified positions. Supports two modes:
-            - "place": place blocks from inventory at each position
-            - "clear": break and remove blocks at each positions
-            
-            Provide a list of (x, y, z) positions. The companion will navigate
-            to each position and place/clear blocks sequentially.
-            Returns a task_id for tracking.
-            """;
+        return ToolMessages.text("build.description");
     }
 
     @Override
     public Map<String, Object> parameterSchema() {
         return Schema.object()
-                .string("mode", "Build mode: 'place' or 'clear'")
-                .optionalString("block_type", "Block ID to place; required only in place mode")
-                .array("positions", "Block coordinates",
+                .string("mode", ToolMessages.text("build.parameter.mode"))
+                .optionalString("block_type", ToolMessages.text("build.parameter.block_type"))
+                .array("positions", ToolMessages.text("build.parameter.positions"),
                         Map.of("type", "array", "items", Map.of("type", "integer"),
                                 "minItems", 3, "maxItems", 3), 1)
                 .build();
@@ -54,12 +47,12 @@ public class BuildTool implements Tool {
                               Consumer<String> reply) {
         String mode = ToolArgs.getString(args, "mode");
         if (mode == null || mode.isBlank()) {
-            reply.accept(ToolArgs.errorJson("Missing required parameter 'mode'"));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.missing_required_parameter_mode")));
             return;
         }
         mode = mode.trim().toLowerCase(java.util.Locale.ROOT);
         if (!mode.equals("place") && !mode.equals("clear")) {
-            reply.accept(ToolArgs.errorJson("Invalid mode: " + mode + "; use place or clear"));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.invalid_mode_0_use_place_or_clear", mode)));
             return;
         }
 
@@ -69,12 +62,12 @@ public class BuildTool implements Tool {
                     : net.minecraft.resources.ResourceLocation.tryParse(blockType.trim());
             if (blockId == null
                     || !net.minecraft.core.registries.BuiltInRegistries.BLOCK.containsKey(blockId)) {
-                reply.accept(ToolArgs.errorJson("Unknown block type: " + blockType));
+                reply.accept(ToolArgs.errorJson(ToolMessages.text("error.unknown_block_type_0", String.valueOf(blockType))));
                 return;
             }
             var block = net.minecraft.core.registries.BuiltInRegistries.BLOCK.get(blockId);
             if (block.asItem() == net.minecraft.world.item.Items.AIR) {
-                reply.accept(ToolArgs.errorJson("Block type has no placeable inventory item: " + blockId));
+                reply.accept(ToolArgs.errorJson(ToolMessages.text("error.block_type_has_no_placeable_inventory_item_0", blockId)));
                 return;
             }
             blockType = blockId.toString();
@@ -83,11 +76,11 @@ public class BuildTool implements Tool {
         }
         JsonArray positionsArray = ToolArgs.getArray(args, "positions");
         if (positionsArray == null || positionsArray.isEmpty()) {
-            reply.accept(ToolArgs.errorJson("positions must be a non-empty array"));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.positions_must_be_a_non_empty_array")));
             return;
         }
         if (positionsArray.size() > 512) {
-            reply.accept(ToolArgs.errorJson("Too many positions (max 512)"));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.too_many_positions_max_512")));
             return;
         }
 
@@ -113,7 +106,7 @@ public class BuildTool implements Tool {
                 }
             }
         } catch (Exception e) {
-            reply.accept(ToolArgs.errorJson("Each position must be exactly [x, y, z] with integer coordinates inside the world border"));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.each_position_must_be_exactly_x_y_z_with_integer_coordinates_inside_the_world_border")));
             return;
         }
 

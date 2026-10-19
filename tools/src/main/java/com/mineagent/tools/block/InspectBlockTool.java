@@ -1,5 +1,6 @@
 package com.mineagent.tools.block;
 
+import com.mineagent.tools.i18n.ToolMessages;
 import com.google.gson.JsonObject;
 import com.mineagent.api.agent.tool.Schema;
 import com.mineagent.api.agent.tool.Tool;
@@ -17,15 +18,15 @@ public class InspectBlockTool implements Tool {
 
     @Override
     public String description() {
-        return "Get a loaded block's ID, state properties, block-entity data, solidity, and hardness.";
+        return ToolMessages.text("inspect_block.description");
     }
 
     @Override
     public Map<String, Object> parameterSchema() {
         return Schema.object()
-                .integer("x", "Block X coordinate", -30_000_000, 30_000_000)
-                .integer("y", "Block Y coordinate", Integer.MIN_VALUE, Integer.MAX_VALUE)
-                .integer("z", "Block Z coordinate", -30_000_000, 30_000_000)
+                .integer("x", ToolMessages.text("inspect_block.parameter.x"), -30_000_000, 30_000_000)
+                .integer("y", ToolMessages.text("inspect_block.parameter.y"), Integer.MIN_VALUE, Integer.MAX_VALUE)
+                .integer("z", ToolMessages.text("inspect_block.parameter.z"), -30_000_000, 30_000_000)
                 .build();
     }
 
@@ -36,7 +37,7 @@ public class InspectBlockTool implements Tool {
         Integer y = ToolArgs.getIntOrNull(args, "y");
         Integer z = ToolArgs.getIntOrNull(args, "z");
         if (x == null || y == null || z == null) {
-            reply.accept(ToolArgs.errorJson("Parameters x, y, and z must be exact integers."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.parameters_x_y_and_z_must_be_exact_integers")));
             return;
         }
 
@@ -45,7 +46,7 @@ public class InspectBlockTool implements Tool {
         if (!level.isInWorldBounds(pos) || !level.isLoaded(pos)) {
             // getBlockState on an arbitrary coordinate can synchronously load
             // or generate a chunk. Perception must never stall the server that way.
-            reply.accept(ToolArgs.errorJson("Block position is outside the loaded world."));
+            reply.accept(ToolArgs.errorJson(ToolMessages.text("error.block_position_is_outside_the_loaded_world")));
             return;
         }
 
