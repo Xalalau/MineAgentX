@@ -1,6 +1,7 @@
 package com.mineagent.tools.inventory;
 
 import com.google.gson.JsonObject;
+import static com.mineagent.tools.inventory.InventoryMessages.t;
 import com.mineagent.api.agent.tool.Schema;
 import com.mineagent.api.agent.tool.Tool;
 import com.mineagent.api.agent.tool.ToolArgs;
@@ -25,17 +26,14 @@ public class DropItemsTool implements Tool {
 
     @Override
     public String description() {
-        return """
-            Drop items from inventory onto the ground. Specify the item ID
-            and count. The items are dropped at the companion's current position.
-            """;
+        return t("description.drop");
     }
 
     @Override
     public Map<String, Object> parameterSchema() {
         return Schema.object()
-                .string("item_id", "Item ID to drop (e.g. 'minecraft:cobblestone')")
-                .integer("count", "Number of items to drop (1-64)", 1, 64)
+                .string("item_id", t("Item ID to drop (e.g. 'minecraft:cobblestone')"))
+                .integer("count", t("Number of items to drop (1-64)"), 1, 64)
                 .build();
     }
 
@@ -44,23 +42,23 @@ public class DropItemsTool implements Tool {
                               Consumer<String> reply) {
         String itemId = ToolArgs.getString(args, "item_id");
         if (itemId == null) {
-            reply.accept("{\"error\":\"Missing required parameter 'item_id'.\"}");
+            reply.accept(ToolArgs.errorJson(t("Missing required parameter 'item_id'.")));
             return;
         }
         if (!ToolArgs.has(args, "count")) {
-            reply.accept("{\"error\":\"Missing required parameter 'count'.\"}");
+            reply.accept(ToolArgs.errorJson(t("Missing required parameter 'count'.")));
             return;
         }
         var parsedItemId = net.minecraft.resources.ResourceLocation.tryParse(itemId);
         if (parsedItemId == null
                 || !net.minecraft.core.registries.BuiltInRegistries.ITEM.containsKey(parsedItemId)) {
-            reply.accept(ToolArgs.errorJson("Unknown item: " + itemId));
+            reply.accept(ToolArgs.errorJson(t("Unknown item: ") + itemId));
             return;
         }
         itemId = parsedItemId.toString();
         Integer count = ToolArgs.getIntOrNull(args, "count");
         if (count == null || count < 1 || count > MAX_DROP_COUNT) {
-            reply.accept(ToolArgs.errorJson("'count' must be an integer from 1 to " + MAX_DROP_COUNT + "."));
+            reply.accept(ToolArgs.errorJson(t("'count' must be an integer from 1 to ") + MAX_DROP_COUNT + "."));
             return;
         }
 
@@ -71,6 +69,8 @@ public class DropItemsTool implements Tool {
         // Find and count matching items
         int remaining = count;
         int dropped = 0;
+        boolean deliveryRefused = false;
+        boolean[] allDeliveriesVerified = {true};
 
         for (int i = 0; i < inv.getContainerSize() && remaining > 0; i++) {
             var stack = inv.getItem(i);
@@ -80,46 +80,33 @@ public class DropItemsTool implements Tool {
             if (!id.equals(itemId)) continue;
 
             int toDrop = Math.min(remaining, stack.getCount());
-            var dropStack = stack.split(toDrop);
-            var droppedEntity = sp.drop(dropStack, false, true);
-            if (droppedEntity == null) {
-                // Player#drop is normally guaranteed on the logical server,
-                // but restoring the split stack keeps item conservation if a
-                // platform hook vetoes entity creation.
-                stack.grow(toDrop);
+            var source = TransferItemsTool.resolveSlot(sp, "player", i);
+            if (source == null || !stack.onDroppedByPlayer(sp)) continue;
+            int accepted = InventorySlotTransactions.drop(source, toDrop, sp, attempt -> {
+                var expected = attempt.copy();
+                // Two-argument Player#drop is NeoForge's normal toss-event path.
+                // ServerPlayer#drop(three arguments) alone bypasses ItemTossEvent
+                // and returns a non-null entity even if addFreshEntity is vetoed.
+                var entity = sp.drop(attempt, true);
+                boolean spawned = entity != null && !entity.isRemoved()
+                        && sp.serverLevel().getEntity(entity.getUUID()) == entity;
+                if (spawned && !net.minecraft.world.item.ItemStack.matches(expected, entity.getItem())) {
+                    allDeliveriesVerified[0] = false;
+                }
+                return spawned;
+            });
+            if (accepted == 0) {
+                deliveryRefused = true;
                 break;
             }
-            remaining -= toDrop;
-            dropped += toDrop;
-
-            if (stack.isEmpty()) {
-                inv.setItem(i, net.minecraft.world.item.ItemStack.EMPTY);
-            }
+            remaining -= accepted;
+            dropped += accepted;
         }
 
-        if (dropped == 0) {
-            reply.accept(ToolArgs.errorJson("Item '" + itemId + "' not found in inventory."));
-        } else {
-            // Publish both the normal inventory menu and any currently open
-            // container menu. Updating only containerMenu leaves the owner's
-            // hotbar stale when a platform keeps a separate inventory menu,
-            // which then makes the next planning snapshot reason from items
-            // that were already dropped.
-            com.mineagent.engine.task.TaskContext.syncInventory(sp);
-            JsonObject result = new JsonObject();
-            int carriedAfter = countItem(inv, itemId);
-            result.addProperty("success", true);
-            result.addProperty("item", itemId);
-            result.addProperty("dropped", dropped);
-            result.addProperty("requested", count);
-            result.addProperty("carried_before", carriedBefore);
-            result.addProperty("carried_after", carriedAfter);
-            // Re-count after the ItemEntity was actually created. A callback
-            // alone is not enough because platform hooks can veto Player#drop.
-            result.addProperty("postcondition_verified",
-                    carriedAfter == carriedBefore - dropped);
-            reply.accept(result.toString());
-        }
+        com.mineagent.engine.task.TaskContext.syncInventory(sp);
+        JsonObject result = InventorySlotTransactions.dropResult(itemId, count, dropped,
+                carriedBefore, countItem(inv, itemId), allDeliveriesVerified[0], deliveryRefused);
+        reply.accept(result.toString());
     }
 
     private static int countItem(net.minecraft.world.entity.player.Inventory inventory,

@@ -1,6 +1,7 @@
 package com.mineagent.tools.inventory;
 
 import com.google.gson.JsonObject;
+import static com.mineagent.tools.inventory.InventoryMessages.t;
 import com.mineagent.api.agent.tool.Schema;
 import com.mineagent.api.agent.tool.Tool;
 import com.mineagent.api.agent.tool.ToolArgs;
@@ -27,21 +28,17 @@ public class TransferItemsTool implements Tool {
 
     @Override
     public String description() {
-        return """
-            Move items between inventory slots or between player inventory and
-            an open container. Player slots are 0-40. Container indices are
-            the indices reported by inspect_gui for the currently open menu.
-            """;
+        return t("description.transfer");
     }
 
     @Override
     public Map<String, Object> parameterSchema() {
         return Schema.object()
-                .integer("from_slot", "Source slot index", 0, 255)
-                .integer("to_slot", "Destination slot index", 0, 255)
-                .optionalInteger("count", "Items to move; default is the full source stack", 1, 64)
-                .optionalString("source", "Source: player or container (default player)")
-                .optionalString("destination", "Destination: player or container (default player)")
+                .integer("from_slot", t("Source slot index"), 0, 255)
+                .integer("to_slot", t("Destination slot index"), 0, 255)
+                .optionalInteger("count", t("Items to move; default is the full source stack"), 1, 64)
+                .optionalString("source", t("Source: player or container (default player)"))
+                .optionalString("destination", t("Destination: player or container (default player)"))
                 .build();
     }
 
@@ -51,25 +48,25 @@ public class TransferItemsTool implements Tool {
         Integer fromIndex = ToolArgs.getIntOrNull(args, "from_slot");
         Integer toIndex = ToolArgs.getIntOrNull(args, "to_slot");
         if (fromIndex == null) {
-            reply.accept(ToolArgs.errorJson("from_slot must be an integer"));
+            reply.accept(ToolArgs.errorJson(t("from_slot must be an integer")));
             return;
         }
         if (toIndex == null) {
-            reply.accept(ToolArgs.errorJson("to_slot must be an integer"));
+            reply.accept(ToolArgs.errorJson(t("to_slot must be an integer")));
             return;
         }
 
         Integer requestedCount = ToolArgs.getIntOrNull(args, "count");
         if (ToolArgs.has(args, "count")
                 && (requestedCount == null || requestedCount < 1 || requestedCount > 64)) {
-            reply.accept(ToolArgs.errorJson("count must be an integer from 1 to 64"));
+            reply.accept(ToolArgs.errorJson(t("count must be an integer from 1 to 64")));
             return;
         }
 
         String sourceType = normalizedEndpoint(args, "source", "player");
         String destinationType = normalizedEndpoint(args, "destination", "player");
         if (!validEndpoint(sourceType) || !validEndpoint(destinationType)) {
-            reply.accept(ToolArgs.errorJson("source and destination must be 'player' or 'container'"));
+            reply.accept(ToolArgs.errorJson(t("source and destination must be 'player' or 'container'")));
             return;
         }
 
@@ -77,105 +74,34 @@ public class TransferItemsTool implements Tool {
         AbstractContainerMenu openMenu = sp.containerMenu;
         if (("container".equals(sourceType) || "container".equals(destinationType))
                 && (openMenu == null || openMenu == sp.inventoryMenu)) {
-            reply.accept(ToolArgs.errorJson("No container GUI is currently open"));
+            reply.accept(ToolArgs.errorJson(t("No container GUI is currently open")));
             return;
         }
 
         Slot source = resolveSlot(sp, sourceType, fromIndex);
         Slot destination = resolveSlot(sp, destinationType, toIndex);
         if (source == null) {
-            reply.accept(ToolArgs.errorJson("Source slot " + fromIndex + " is out of range"));
+            reply.accept(ToolArgs.errorJson(t("Source slot ") + fromIndex + t(" is out of range")));
             return;
         }
         if (destination == null) {
-            reply.accept(ToolArgs.errorJson("Destination slot " + toIndex + " is out of range"));
+            reply.accept(ToolArgs.errorJson(t("Destination slot ") + toIndex + t(" is out of range")));
             return;
         }
-        if (sameBackingSlot(source, destination)) {
-            reply.accept(ToolArgs.errorJson("Source and destination refer to the same inventory slot"));
-            return;
-        }
-        if (!source.isActive() || !source.mayPickup(sp)) {
-            reply.accept(ToolArgs.errorJson("Source slot cannot be taken from"));
-            return;
-        }
-
-        ItemStack sourceStack = source.getItem();
-        ItemStack destinationStack = destination.getItem();
-        if (sourceStack.isEmpty()) {
-            reply.accept(ToolArgs.errorJson("Source slot " + fromIndex + " is empty"));
-            return;
-        }
-        if (!destination.isActive() || !destination.mayPlace(sourceStack)) {
-            reply.accept(ToolArgs.errorJson("Destination slot does not accept this item"));
-            return;
-        }
-        // Keep the identity before safeTake/shrink mutates the source stack to
-        // empty. Reading sourceStack.getItem() after the transfer previously
-        // produced minecraft:air for a full-stack move.
+        ItemStack sourceBeforeStack = source.getItem().copy();
         String movedItemId = BuiltInRegistries.ITEM
-                .getKey(sourceStack.getItem()).toString();
-        int sourceBefore = sourceStack.getCount();
-        int destinationBefore = destinationStack.getCount();
-        String destinationItemBefore = destinationStack.isEmpty() ? "minecraft:air"
-                : BuiltInRegistries.ITEM.getKey(destinationStack.getItem()).toString();
-
-        int requested = requestedCount == null
-                ? sourceStack.getCount() : Math.min(requestedCount, sourceStack.getCount());
-        int moved;
-        String action;
-
-        if (!destinationStack.isEmpty()
-                && !ItemStack.isSameItemSameComponents(sourceStack, destinationStack)) {
-            // A partial swap has no unambiguous inventory meaning. The old
-            // implementation ignored count and exchanged both complete stacks.
-            if (requested != sourceStack.getCount()) {
-                reply.accept(ToolArgs.errorJson(
-                        "A destination containing a different item requires moving the full source stack"));
-                return;
-            }
-            if (!source.mayPlace(destinationStack)
-                    || sourceStack.getCount() > destination.getMaxStackSize(sourceStack)
-                    || destinationStack.getCount() > source.getMaxStackSize(destinationStack)) {
-                reply.accept(ToolArgs.errorJson("The two slots cannot accept each other's stacks"));
-                return;
-            }
-
-            source.setByPlayer(destinationStack);
-            destination.setByPlayer(sourceStack);
-            source.setChanged();
-            destination.setChanged();
-            moved = requested;
-            action = "swap";
-        } else {
-            int capacity = destinationStack.isEmpty()
-                    ? destination.getMaxStackSize(sourceStack)
-                    : Math.min(destination.getMaxStackSize(sourceStack),
-                            destinationStack.getMaxStackSize()) - destinationStack.getCount();
-            moved = Math.min(requested, Math.max(0, capacity));
-            if (moved <= 0) {
-                reply.accept(ToolArgs.errorJson("Destination slot is full"));
-                return;
-            }
-
-            // safeTake enforces source-slot behavior such as crafting-result
-            // consumption. Capacity is checked first so no taken stack is ever
-            // stranded or duplicated during a failed insertion.
-            ItemStack taken = source.safeTake(moved, moved, sp);
-            if (taken.isEmpty()) {
-                reply.accept(ToolArgs.errorJson("Source slot refused the transfer"));
-                return;
-            }
-            moved = taken.getCount();
-            if (destinationStack.isEmpty()) {
-                destination.setByPlayer(taken);
-            } else {
-                destinationStack.grow(moved);
-                destination.setChanged();
-            }
-            source.setChanged();
-            action = "transfer";
+                .getKey(sourceBeforeStack.getItem()).toString();
+        int requested = requestedCount == null ? sourceBeforeStack.getCount()
+                : requestedCount;
+        var outcome = InventorySlotTransactions.move(source, destination, requested, sp);
+        int moved = outcome.moved();
+        if (moved == 0) {
+            JsonObject refused = outcome.result(requested);
+            refused.addProperty("error", t("No items moved; slot rules or capacity refused the operation."));
+            reply.accept(refused.toString());
+            return;
         }
+        String action = outcome.swap() ? "swap" : "transfer";
 
         TaskContext.syncInventory(sp);
         if (openMenu != null) openMenu.broadcastChanges();
@@ -187,37 +113,15 @@ public class TransferItemsTool implements Tool {
             WorldAssetObserver.observeOpenMenu(loop.worldAssetIndex(), sp, openMenu);
         }
 
-        JsonObject result = new JsonObject();
-        result.addProperty("success", true);
+        JsonObject result = outcome.result(requested);
         result.addProperty("action", action);
         result.addProperty("item", movedItemId);
         result.addProperty("source", sourceType);
         result.addProperty("destination", destinationType);
         result.addProperty("from_slot", fromIndex);
         result.addProperty("to_slot", toIndex);
-        result.addProperty("count", moved);
-        ItemStack sourceAfterStack = source.getItem();
-        ItemStack destinationAfterStack = destination.getItem();
-        int sourceAfter = sourceAfterStack.getCount();
-        int destinationAfter = destinationAfterStack.getCount();
-        boolean verified;
-        if ("swap".equals(action)) {
-            String sourceAfterItem = sourceAfterStack.isEmpty() ? "minecraft:air"
-                    : BuiltInRegistries.ITEM.getKey(sourceAfterStack.getItem()).toString();
-            String destinationAfterItem = destinationAfterStack.isEmpty() ? "minecraft:air"
-                    : BuiltInRegistries.ITEM.getKey(destinationAfterStack.getItem()).toString();
-            verified = sourceAfter == destinationBefore
-                    && destinationAfter == sourceBefore
-                    && sourceAfterItem.equals(destinationItemBefore)
-                    && destinationAfterItem.equals(movedItemId);
-        } else {
-            verified = sourceAfter == sourceBefore - moved
-                    && destinationAfter == destinationBefore + moved
-                    && sourceBefore + destinationBefore == sourceAfter + destinationAfter;
-        }
-        result.addProperty("source_count_after", sourceAfter);
-        result.addProperty("destination_count_after", destinationAfter);
-        result.addProperty("postcondition_verified", verified);
+        result.addProperty("source_count_after", source.getItem().getCount());
+        result.addProperty("destination_count_after", destination.getItem().getCount());
         reply.accept(result.toString());
     }
 
@@ -230,7 +134,7 @@ public class TransferItemsTool implements Tool {
         return "player".equals(value) || "container".equals(value);
     }
 
-    private static Slot resolveSlot(ServerPlayer sp, String endpoint, int index) {
+    static Slot resolveSlot(ServerPlayer sp, String endpoint, int index) {
         if (index < 0) return null;
         if ("container".equals(endpoint)) {
             AbstractContainerMenu menu = sp.containerMenu;
@@ -252,8 +156,4 @@ public class TransferItemsTool implements Tool {
         return null;
     }
 
-    private static boolean sameBackingSlot(Slot a, Slot b) {
-        return a == b || (a.container == b.container
-                && a.getContainerSlot() == b.getContainerSlot());
-    }
 }

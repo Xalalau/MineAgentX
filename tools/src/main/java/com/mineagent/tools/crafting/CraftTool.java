@@ -2,11 +2,13 @@ package com.mineagent.tools.crafting;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import static com.mineagent.tools.inventory.InventoryMessages.t;
 import com.mineagent.api.agent.tool.Schema;
 import com.mineagent.api.agent.tool.Tool;
 import com.mineagent.api.agent.tool.ToolArgs;
 import com.mineagent.api.entity.AgentPlayer;
 import com.mineagent.engine.entity.CompanionEntity;
+import com.mineagent.tools.inventory.InventoryCraftTransactions;
 import com.mineagent.engine.task.TaskContext;
 import com.mineagent.engine.world.WorldAssetIndex;
 import com.mineagent.engine.world.WorldAssetObserver;
@@ -40,22 +42,18 @@ public class CraftTool implements Tool {
 
     @Override
     public String description() {
-        return """
-            Craft items using a registered crafting recipe. The companion uses
-            its 2x2 grid or a nearby crafting table for 3x3 recipes. The count
-            is the number of recipe batches, not the number of output items.
-            """;
+        return t("description.craft");
     }
 
     @Override
     public Map<String, Object> parameterSchema() {
         return Schema.object()
-                .string("recipe_id", "Registered crafting recipe ID (e.g. 'minecraft:stone_pickaxe')")
-                .integer("count", "Number of recipe batches to craft (1-64)", 1, 64)
-                .optionalString("use_table", "Crafting station: 'auto', 'table', or 'inventory' (default: 'auto')")
-                .optionalInteger("desired_total", "Desired total count after crafting. Defaults to count multiplied by recipe output; existing inventory reduces work.", 1, 4096)
-                .optionalString("purpose", "Why this item is needed; state the capability or explicit request for an additional copy")
-                .optionalBoolean("bypass_reuse_check", "Use only after a returned reuse candidate was verified unavailable, unsafe, too costly, or the owner explicitly requested an additional copy")
+                .string("recipe_id", t("Registered crafting recipe ID (e.g. 'minecraft:stone_pickaxe')"))
+                .integer("count", t("Number of recipe batches to craft (1-64)"), 1, 64)
+                .optionalString("use_table", t("Crafting station: 'auto', 'table', or 'inventory' (default: 'auto')"))
+                .optionalInteger("desired_total", t("Desired total count after crafting. Defaults to count multiplied by recipe output; existing inventory reduces work."), 1, 4096)
+                .optionalString("purpose", t("Why this item is needed; state the capability or explicit request for an additional copy"))
+                .optionalBoolean("bypass_reuse_check", t("Use only after a returned reuse candidate was verified unavailable, unsafe, too costly, or the owner explicitly requested an additional copy"))
                 .build();
     }
 
@@ -64,34 +62,34 @@ public class CraftTool implements Tool {
                              Consumer<String> reply) {
         String requestedId = ToolArgs.getString(args, "recipe_id");
         if (requestedId == null || requestedId.isBlank()) {
-            reply.accept(ToolArgs.errorJson("Missing required parameter 'recipe_id'."));
+            reply.accept(ToolArgs.errorJson(t("Missing required parameter 'recipe_id'.")));
             return;
         }
         ResourceLocation recipeId = ResourceLocation.tryParse(requestedId);
         if (recipeId == null) {
-            reply.accept(ToolArgs.errorJson("Invalid recipe ID: " + requestedId));
+            reply.accept(ToolArgs.errorJson(t("Invalid recipe ID: ") + requestedId));
             return;
         }
         Integer requestedBatches = ToolArgs.getIntOrNull(args, "count");
         if (requestedBatches == null || requestedBatches < 1 || requestedBatches > MAX_BATCHES) {
-            reply.accept(ToolArgs.errorJson("'count' must be an integer from 1 to " + MAX_BATCHES + "."));
+            reply.accept(ToolArgs.errorJson(t("'count' must be an integer from 1 to ") + MAX_BATCHES + "."));
             return;
         }
         String mode = ToolArgs.getString(args, "use_table", "auto").toLowerCase(Locale.ROOT);
         if (!List.of("auto", "table", "inventory").contains(mode)) {
-            reply.accept(ToolArgs.errorJson("'use_table' must be 'auto', 'table', or 'inventory'."));
+            reply.accept(ToolArgs.errorJson(t("'use_table' must be 'auto', 'table', or 'inventory'.")));
             return;
         }
 
         var sp = ((CompanionEntity) player).serverPlayer();
         RecipeHolder<?> untypedHolder = sp.level().getRecipeManager().byKey(recipeId).orElse(null);
         if (untypedHolder == null) {
-            reply.accept(ToolArgs.errorJson("Recipe '" + recipeId + "' was not found."));
+            reply.accept(ToolArgs.errorJson(t("Recipe '") + recipeId + t("' was not found.")));
             return;
         }
         if (!(untypedHolder.value() instanceof CraftingRecipe recipe)) {
-            reply.accept(ToolArgs.errorJson("Recipe '" + recipeId
-                    + "' is not a crafting-grid recipe. Use its required station instead."));
+            reply.accept(ToolArgs.errorJson(t("Recipe '") + recipeId
+                    + t("' is not a crafting-grid recipe. Use its required station instead.")));
             return;
         }
 
@@ -104,7 +102,7 @@ public class CraftTool implements Tool {
                 ? ToolArgs.getIntOrNull(args, "desired_total") : null;
         if (ToolArgs.has(args, "desired_total")
                 && (desiredArgument == null || desiredArgument < 1 || desiredArgument > 4096)) {
-            reply.accept(ToolArgs.errorJson("'desired_total' must be an integer from 1 to 4096."));
+            reply.accept(ToolArgs.errorJson(t("'desired_total' must be an integer from 1 to 4096.")));
             return;
         }
         int desiredTotal = desiredArgument == null
@@ -140,7 +138,7 @@ public class CraftTool implements Tool {
                     // idempotent postcondition rather than a textual claim.
                     result.addProperty("postcondition_verified", true);
                     result.addProperty("reason",
-                            "The requested total is already present; no ingredients were consumed.");
+                            t("The requested total is already present; no ingredients were consumed."));
                     reply.accept(result.toString());
                     return;
                 }
@@ -164,14 +162,14 @@ public class CraftTool implements Tool {
                     decision.addProperty("carried_count", reuse.carriedExactCount());
                     decision.addProperty("unresolved_count", unresolved);
                     decision.addProperty("purpose",
-                            ToolArgs.getString(args, "purpose", "unspecified"));
+                            ToolArgs.getString(args, "purpose", t("unspecified")));
                     JsonArray candidates = new JsonArray();
                     reuse.storedExact().forEach(value -> candidates.add(reuseJson(value)));
                     reuse.storedSubstitutes().forEach(value -> candidates.add(reuseJson(value)));
                     reuse.worldExact().forEach(value -> candidates.add(reuseJson(value)));
                     decision.add("reuse_candidates", candidates);
                     decision.addProperty("required_next_step",
-                            "Compare live safety, reachability, time and owner intent. Verify stored contents with goto + inspect_block_storage/open GUI before transfer. Retry with bypass_reuse_check=true only with a concrete reason or explicit extra-copy requirement.");
+                            t("Compare live safety, reachability, time and owner intent. Verify stored contents with goto + inspect_block_storage/open GUI before transfer. Retry with bypass_reuse_check=true only with a concrete reason or explicit extra-copy requirement."));
                     reply.accept(decision.toString());
                     return;
                 }
@@ -181,16 +179,16 @@ public class CraftTool implements Tool {
         boolean fitsInventory = recipe.canCraftInDimensions(2, 2);
         boolean requireTable = mode.equals("table") || (!fitsInventory && mode.equals("auto"));
         if (mode.equals("inventory") && !fitsInventory) {
-            reply.accept(ToolArgs.errorJson("Recipe '" + recipeId + "' does not fit the 2x2 inventory grid."));
+            reply.accept(ToolArgs.errorJson(t("Recipe '") + recipeId + t("' does not fit the 2x2 inventory grid.")));
             return;
         }
         if (requireTable) {
             BlockPos nearestTable = findNearestCraftingTable(
                     sp, CRAFTING_TABLE_DISCOVERY_RADIUS);
             if (nearestTable == null) {
-                reply.accept(ToolArgs.errorJson("No crafting table was found within "
-                        + CRAFTING_TABLE_DISCOVERY_RADIUS + " blocks for recipe '"
-                        + recipeId + "'. Observe or obtain a table before retrying."));
+                reply.accept(ToolArgs.errorJson(t("No crafting table was found within ")
+                        + CRAFTING_TABLE_DISCOVERY_RADIUS + t(" blocks for recipe '")
+                        + recipeId + t("'. Observe or obtain a table before retrying.")));
                 return;
             }
             double tableDistance = Math.sqrt(nearestTable.distToCenterSqr(sp.position()));
@@ -202,7 +200,7 @@ public class CraftTool implements Tool {
                 JsonObject error = new JsonObject();
                 error.addProperty("success", false);
                 error.addProperty("code", "crafting_table_out_of_reach");
-                error.addProperty("error", "A crafting table exists nearby but is outside crafting range.");
+                error.addProperty("error", t("A crafting table exists nearby but is outside crafting range."));
                 JsonObject table = new JsonObject();
                 table.addProperty("x", nearestTable.getX());
                 table.addProperty("y", nearestTable.getY());
@@ -210,7 +208,7 @@ public class CraftTool implements Tool {
                 table.addProperty("distance", Math.round(tableDistance * 10.0) / 10.0);
                 error.add("nearest_table", table);
                 error.addProperty("required_range", CRAFTING_TABLE_RADIUS);
-                error.addProperty("suggested_action", "Use goto with goal_mode=block and the nearest_table coordinates, then retry craft.");
+                error.addProperty("suggested_action", t("Use goto with goal_mode=block and the nearest_table coordinates, then retry craft."));
                 reply.accept(error.toString());
                 return;
             }
@@ -222,8 +220,8 @@ public class CraftTool implements Tool {
         if (loopForReservation != null && outputItemId != null
                 && !loopForReservation.reservationLedger().reserve(
                 reservationId, "output:" + outputItemId,
-                "craft " + recipeId, sp.level().getGameTime(), 240L, true)) {
-            reply.accept(ToolArgs.errorJson("The requested output is already reserved by another active action; verify current plan before crafting again."));
+                t("craft ") + recipeId, sp.level().getGameTime(), 240L, true)) {
+            reply.accept(ToolArgs.errorJson(t("The requested output is already reserved by another active action; verify current plan before crafting again.")));
             return;
         }
         try {
@@ -241,9 +239,16 @@ public class CraftTool implements Tool {
                 : countItem(sp.getInventory(), craftedItemId);
         String stopReason = null;
         for (int batch = 0; batch < batchesToCraft; batch++) {
+            if (!com.mineagent.api.execution.ExecutionToken.active()) {
+                stopReason = com.mineagent.api.i18n.RuntimeLanguage.language()
+                        == com.mineagent.api.i18n.Language.PT_BR
+                        ? "A fabricação parou após os lotes confirmados porque a execução foi revogada ou expirou."
+                        : "Crafting stopped after the committed batches because execution was revoked or expired.";
+                break;
+            }
             CraftPlan plan = createPlan(sp.getInventory(), recipe, gridSize, sp.level());
             if (plan == null) {
-                stopReason = "Missing ingredients that form a valid recipe input.";
+                stopReason = t("Missing ingredients that form a valid recipe input.");
                 break;
             }
 
@@ -252,7 +257,7 @@ public class CraftTool implements Tool {
                 // Dynamic recipes are allowed only when their actual input
                 // produces an output. Never consume ingredients based on the
                 // recipe's preview stack, which can be empty or incomplete.
-                stopReason = "The selected ingredients produced no crafting result.";
+                stopReason = t("The selected ingredients produced no crafting result.");
                 break;
             }
             String actualOutputId = net.minecraft.core.registries.BuiltInRegistries.ITEM
@@ -262,53 +267,47 @@ public class CraftTool implements Tool {
                 // A single result must describe one measurable inventory
                 // postcondition. Stop before consumption if a dynamic recipe
                 // changes its output identity between batches.
-                stopReason = "Recipe output changed between batches.";
+                stopReason = t("Recipe output changed between batches.");
                 break;
             }
             var remainders = recipe.getRemainingItems(plan.input());
             if (remainders.size() != plan.input().size()) {
-                stopReason = "Recipe returned an invalid remainder list.";
+                stopReason = t("Recipe returned an invalid remainder list.");
                 break;
             }
 
-            // Everything above this point is a read-only preparation phase.
-            // Once consumption begins, every source slot and remainder is
-            // already known, so a failed recipe can never remove half a batch.
-            consumeInputs(sp.getInventory(), plan);
-            for (int gridSlot = 0; gridSlot < remainders.size(); gridSlot++) {
-                ItemStack remainder = remainders.get(gridSlot).copy();
-                if (!remainder.isEmpty()) {
-                    allDeliveriesVerified &= returnRemainder(
-                            sp, plan.inventorySlots()[gridSlot], remainder);
-                }
-            }
-
+            // Reserve room for every remainder and output before consuming.
+            // This is a transient write set over the real inventory, not a
+            // second inventory or a virtual material balance. No overflow is
+            // entrusted to cancellable world spawning after ingredients vanish.
             int outputCount = output.getCount();
-            output.onCraftedBy(sp.level(), sp, outputCount);
-            // Inputs have already been consumed at this point, so count the
-            // batch even if a full inventory/mod hook later rejects delivery.
-            // Stopping immediately prevents a failed delivery from cascading
-            // into many additional consumed batches and makes the partial
-            // outcome explicit to the planner.
+            var craftOutcome = InventoryCraftTransactions.craftAndNotify(sp.getInventory(),
+                    plan.inventorySlots(), plan.input().items(), output, remainders, () -> {
+                        output.onCraftedBy(sp.level(), sp, outputCount);
+                        net.neoforged.neoforge.event.EventHooks.firePlayerCraftingEvent(sp, output,
+                                new net.minecraft.world.SimpleContainer(plan.input().items().toArray(ItemStack[]::new)));
+                        sp.triggerRecipeCrafted(untypedHolder, plan.input().items());
+                        sp.awardRecipes(List.of(untypedHolder));
+                    });
+            if (!craftOutcome.committed()) {
+                stopReason = t("Insufficient carried capacity or changed ingredients; this batch consumed nothing.");
+                break;
+            }
             craftedBatches++;
             craftedItems += outputCount;
-            boolean outputDelivered = deliverOrDrop(sp, output);
-            allDeliveriesVerified &= outputDelivered;
-            if (!outputDelivered) {
-                stopReason = "Crafted output could not be inserted or spawned; no further batches were attempted.";
-                sp.triggerRecipeCrafted(untypedHolder, plan.input().items());
-                sp.awardRecipes(List.of(untypedHolder));
+            if (!craftOutcome.notified()) {
+                allDeliveriesVerified = false;
+                stopReason = t("Craft delivered, but a recipe notification failed; no further batches were attempted.")
+                        + " (" + craftOutcome.notificationFailure() + ")";
                 break;
             }
-            sp.triggerRecipeCrafted(untypedHolder, plan.input().items());
-            sp.awardRecipes(List.of(untypedHolder));
         }
 
         TaskContext.syncInventory(sp);
         if (craftedBatches == 0) {
             if (loopForReservation != null) loopForReservation.reservationLedger().release(reservationId);
-            reply.accept(ToolArgs.errorJson("Cannot craft '" + recipeId + "'. "
-                    + (stopReason != null ? stopReason : "Unknown crafting failure.")));
+            reply.accept(ToolArgs.errorJson(t("Cannot craft '") + recipeId + "'. "
+                    + (stopReason != null ? stopReason : t("Unknown crafting failure."))));
             return;
         }
 
@@ -320,19 +319,22 @@ public class CraftTool implements Tool {
         result.addProperty("success", allDeliveriesVerified);
         result.addProperty("recipe", recipeId.toString());
         result.addProperty("crafted_batches", craftedBatches);
+        result.addProperty("requested_batches", requestedBatches);
+        result.addProperty("planned_batches", batchesToCraft);
+        result.addProperty("complete", craftedBatches == batchesToCraft && allDeliveriesVerified);
+        result.addProperty("remaining_batches", batchesToCraft - craftedBatches);
         result.addProperty("crafted_items", craftedItems);
         result.addProperty("desired_total", desiredTotal);
         result.addProperty("item", craftedItemId);
         result.addProperty("carried_before", carriedBefore);
         result.addProperty("carried_after", craftedItemId == null ? 0
                 : countItem(sp.getInventory(), craftedItemId));
-        // Inventory insertion is verified by Inventory#add consuming the
-        // remainder stack; overflow is verified by a non-null ItemEntity from
-        // Player#drop. Failed delivery must not be promoted into memory.
+        // Every committed batch has a complete carried-slot write set.
+        // Capacity failures stop before consuming that batch.
         result.addProperty("postcondition_verified", allDeliveriesVerified);
         if (!allDeliveriesVerified) {
             result.addProperty("error", stopReason == null
-                    ? "Craft output delivery was not verified." : stopReason);
+                    ? t("Craft output delivery was not verified.") : stopReason);
         }
         if (craftedBatches < batchesToCraft && stopReason != null) {
             result.addProperty("stopped_reason", stopReason);
@@ -435,9 +437,19 @@ public class CraftTool implements Tool {
                         ? inventory.getItem(inventorySlot).copyWithCount(1)
                         : ItemStack.EMPTY);
             }
-            CraftingInput input = CraftingInput.of(gridSize, gridSize, grid);
-            return recipe.matches(input, level)
-                    ? new CraftPlan(input, assignedInventorySlots.clone()) : null;
+            var positioned = CraftingInput.ofPositioned(gridSize, gridSize, grid);
+            CraftingInput input = positioned.input();
+            int[] trimmedSlots = new int[input.size()];
+            // Minecraft trims empty outer rows/columns from CraftingInput.
+            // Remainders and ingredient debits must use that same coordinate
+            // space, not the original 2x2/3x3 assignment array.
+            for (int row = 0; row < input.height(); row++) {
+                for (int column = 0; column < input.width(); column++) {
+                    trimmedSlots[column + row * input.width()] = assignedInventorySlots[
+                            column + positioned.left() + (row + positioned.top()) * gridSize];
+                }
+            }
+            return recipe.matches(input, level) ? new CraftPlan(input, trimmedSlots) : null;
         }
 
         int gridSlot = requiredGridSlots.get(cursor);
@@ -468,48 +480,6 @@ public class CraftTool implements Tool {
             if (ingredient.test(inventory.getItem(slot))) count++;
         }
         return count;
-    }
-
-    private static void consumeInputs(Inventory inventory, CraftPlan plan) {
-        for (int inventorySlot : plan.inventorySlots()) {
-            if (inventorySlot < 0) continue;
-            ItemStack stack = inventory.getItem(inventorySlot);
-            stack.shrink(1);
-            if (stack.isEmpty()) inventory.setItem(inventorySlot, ItemStack.EMPTY);
-        }
-    }
-
-    private static boolean returnRemainder(net.minecraft.server.level.ServerPlayer sp,
-                                           int sourceSlot, ItemStack remainder) {
-        Inventory inventory = sp.getInventory();
-        if (sourceSlot >= 0) {
-            ItemStack current = inventory.getItem(sourceSlot);
-            if (current.isEmpty()) {
-                inventory.setItem(sourceSlot, remainder);
-                return true;
-            }
-            if (ItemStack.isSameItemSameComponents(current, remainder)) {
-                int transferable = Math.min(remainder.getCount(),
-                        current.getMaxStackSize() - current.getCount());
-                if (transferable > 0) {
-                    current.grow(transferable);
-                    remainder.shrink(transferable);
-                }
-                if (remainder.isEmpty()) return true;
-            }
-        }
-        return deliverOrDrop(sp, remainder);
-    }
-
-    private static boolean deliverOrDrop(net.minecraft.server.level.ServerPlayer sp,
-                                         ItemStack stack) {
-        if (stack.isEmpty()) return true;
-        sp.getInventory().add(stack);
-        if (stack.isEmpty()) return true;
-        // A non-null entity is the authoritative acknowledgement that the
-        // overflow stack entered the world. Never report a completed craft if
-        // a platform hook vetoed that spawn.
-        return sp.drop(stack, false, true) != null;
     }
 
     private static int countItem(Inventory inventory, String itemId) {

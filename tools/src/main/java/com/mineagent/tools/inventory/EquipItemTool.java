@@ -1,6 +1,7 @@
 package com.mineagent.tools.inventory;
 
 import com.google.gson.JsonObject;
+import static com.mineagent.tools.inventory.InventoryMessages.t;
 import com.mineagent.api.agent.tool.Schema;
 import com.mineagent.api.agent.tool.Tool;
 import com.mineagent.api.agent.tool.ToolArgs;
@@ -9,7 +10,6 @@ import com.mineagent.engine.entity.CompanionEntity;
 import com.mineagent.engine.task.TaskContext;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.entity.EquipmentSlot;
 
 import java.util.Locale;
 import java.util.Map;
@@ -23,18 +23,14 @@ public class EquipItemTool implements Tool {
 
     @Override
     public String description() {
-        return """
-            Equip an inventory item in head, chest, legs, feet, offhand, or
-            hotbar_1 through hotbar_9. Existing target contents are swapped
-            back into the source slot.
-            """;
+        return t("description.equip");
     }
 
     @Override
     public Map<String, Object> parameterSchema() {
         return Schema.object()
-                .string("item_id", "Registered item ID to equip")
-                .string("slot", "head, chest, legs, feet, offhand, or hotbar_1-9")
+                .string("item_id", t("Registered item ID to equip"))
+                .string("slot", t("head, chest, legs, feet, offhand, or hotbar_1-9"))
                 .build();
     }
 
@@ -45,28 +41,30 @@ public class EquipItemTool implements Tool {
         ResourceLocation itemId = requestedItem == null
                 ? null : ResourceLocation.tryParse(requestedItem.trim());
         if (itemId == null || !BuiltInRegistries.ITEM.containsKey(itemId)) {
-            reply.accept(ToolArgs.errorJson("Unknown item: " + requestedItem));
+            reply.accept(ToolArgs.errorJson(t("Unknown item: ") + requestedItem));
             return;
         }
 
         String slotName = ToolArgs.getString(args, "slot");
         if (slotName == null || slotName.isBlank()) {
-            reply.accept(ToolArgs.errorJson("Missing required parameter 'slot'"));
+            reply.accept(ToolArgs.errorJson(t("Missing required parameter 'slot'")));
             return;
         }
         slotName = slotName.trim().toLowerCase(Locale.ROOT);
 
         int targetSlot = inventorySlot(slotName);
         if (targetSlot < 0) {
-            reply.accept(ToolArgs.errorJson("Unknown slot '" + slotName
-                    + "'; use head/chest/legs/feet/offhand/hotbar_1-9"));
+            reply.accept(ToolArgs.errorJson(t("Unknown slot '") + slotName
+                    + t("'; use head/chest/legs/feet/offhand/hotbar_1-9")));
             return;
         }
 
         var sp = ((CompanionEntity) player).serverPlayer();
         var inventory = sp.getInventory();
-        int sourceSlot = -1;
-        for (int i = 0; i < inventory.getContainerSize(); i++) {
+        int sourceSlot = !inventory.getItem(targetSlot).isEmpty()
+                && BuiltInRegistries.ITEM.getKey(inventory.getItem(targetSlot).getItem()).equals(itemId)
+                ? targetSlot : -1;
+        for (int i = 0; sourceSlot < 0 && i < inventory.getContainerSize(); i++) {
             var stack = inventory.getItem(i);
             if (!stack.isEmpty()
                     && BuiltInRegistries.ITEM.getKey(stack.getItem()).equals(itemId)) {
@@ -75,26 +73,25 @@ public class EquipItemTool implements Tool {
             }
         }
         if (sourceSlot < 0) {
-            reply.accept(ToolArgs.errorJson("Item '" + itemId + "' not found in inventory"));
+            reply.accept(ToolArgs.errorJson(t("Item '") + itemId + t("' not found in inventory")));
             return;
         }
 
-        var sourceStack = inventory.getItem(sourceSlot);
-        EquipmentSlot equipmentSlot = equipmentSlot(slotName);
-        if (equipmentSlot != null
-                && sp.getEquipmentSlotForItem(sourceStack) != equipmentSlot) {
-            reply.accept(ToolArgs.errorJson("Item '" + itemId
-                    + "' cannot be equipped in slot '" + slotName + "'"));
-            return;
-        }
-
+        var sourceStack = inventory.getItem(sourceSlot).copy();
+        boolean moveVerified = true;
         if (sourceSlot != targetSlot) {
-            // Move object references rather than copies. This preserves the
-            // exact total item count and all components/durability on both
-            // stacks, including the displaced equipment.
-            var targetStack = inventory.getItem(targetSlot);
-            inventory.setItem(targetSlot, sourceStack);
-            inventory.setItem(sourceSlot, targetStack);
+            var source = TransferItemsTool.resolveSlot(sp, "player", sourceSlot);
+            var target = TransferItemsTool.resolveSlot(sp, "player", targetSlot);
+            if (source == null || target == null) {
+                reply.accept(ToolArgs.errorJson(t("Equipment slots are unavailable.")));
+                return;
+            }
+            var outcome = InventorySlotTransactions.move(source, target, sourceStack.getCount(), sp);
+            moveVerified = outcome.verified() && outcome.moved() > 0;
+            if (!moveVerified) {
+                reply.accept(ToolArgs.errorJson(t("Equipment move was refused or could not be verified.")));
+                return;
+            }
         }
         if (targetSlot < 9) inventory.selected = targetSlot;
         TaskContext.syncInventory(sp);
@@ -104,12 +101,12 @@ public class EquipItemTool implements Tool {
         // This is a server-side read after the swap, not an assertion based on
         // the requested arguments. AgentLoop uses it as the transaction's
         // synchronous postcondition.
-        boolean verified = !equipped.isEmpty()
+        boolean verified = moveVerified && !equipped.isEmpty()
                 && BuiltInRegistries.ITEM.getKey(equipped.getItem()).equals(itemId)
                 && selected;
 
         JsonObject result = new JsonObject();
-        result.addProperty("success", true);
+        result.addProperty("success", verified);
         result.addProperty("item", itemId.toString());
         result.addProperty("slot", slotName);
         result.addProperty("postcondition_verified", verified);
@@ -136,14 +133,4 @@ public class EquipItemTool implements Tool {
         };
     }
 
-    private static EquipmentSlot equipmentSlot(String slot) {
-        return switch (slot) {
-            case "head" -> EquipmentSlot.HEAD;
-            case "chest" -> EquipmentSlot.CHEST;
-            case "legs" -> EquipmentSlot.LEGS;
-            case "feet" -> EquipmentSlot.FEET;
-            case "offhand" -> EquipmentSlot.OFFHAND;
-            default -> null;
-        };
-    }
 }
