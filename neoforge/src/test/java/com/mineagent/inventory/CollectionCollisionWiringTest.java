@@ -16,13 +16,13 @@ class CollectionCollisionWiringTest {
     @Test void engineClosesObservationAroundPhysicalTickEvenOnFailure() throws Exception {
         String engine = source("engine/src/main/java/com/mineagent/engine/MineAgentEngine.java");
         int auction = engine.indexOf("state.auction.tick();", engine.indexOf("public static void onServerTick"));
-        int scope = engine.indexOf("try (var collisionFrame =", auction);
+        int scope = engine.indexOf("try (var collisionFrame =", engine.indexOf("public static void onServerTick"));
         int physics = engine.indexOf("sp.connection.tick()", scope);
         int catchFailure = engine.indexOf("} catch (Throwable t)", physics);
-        assertTrue(auction > 0 && scope > auction && physics > scope && catchFailure > physics);
+        assertTrue(scope > 0 && auction > scope && physics > auction && catchFailure > physics);
         String observation = engine.substring(scope, physics);
         assertTrue(observation.contains("state.lifecycle.isPaused() || state.lifecycle.isDead()"));
-        assertTrue(observation.contains("state.auction.physicalTask()"));
+        assertTrue(observation.contains("state.auction.physicalFrameTask()"));
     }
 
     @Test void schedulerExposesOnlyItsUnpausedPhysicalTask() throws Exception {
@@ -33,16 +33,18 @@ class CollectionCollisionWiringTest {
                 .contains("return taskPaused ? null : currentTask;"));
     }
 
-    @Test void passiveFrameRequiresAnAttemptAndNeverWritesPickupPolicyOrInventory() throws Exception {
+    @Test void frameRequiresAnAttemptAndOnlyVetoesWithinRetainedBudget() throws Exception {
         String frame = source("engine/src/main/java/com/mineagent/engine/task/CollectionCollisionFrame.java");
         assertTrue(frame.contains("new CollectionPickupObservation(event.getItemEntity(), player.getInventory())"));
         assertTrue(frame.contains("attempts.remove(event.getItemEntity())"));
+        assertTrue(frame.contains("task.capsCollisions()") && frame.contains("task.reserveCollisionPickup(reserved)"));
+        assertTrue(frame.contains("event.setCanPickup(net.neoforged.neoforge.common.util.TriState.FALSE)"));
         assertTrue(frame.contains("event.getPlayer() != player"));
-        assertTrue(frame.contains("task.recordCollisionPickup(observation.delivered())"));
+        assertTrue(frame.contains("task.settleCollisionPickup(attempt.reserved(), attempt.observation().delivered())"));
         assertTrue(frame.contains("unregister(pre)") && frame.contains("unregister(post)"));
         assertTrue(frame.contains("CURRENT.remove()") && frame.contains("attempts.clear()"));
-        for (String mutation : new String[] {"setCanPickup", "setCount(", "split(", "setItem(", "playerTouch(", "ExecutionToken.active()"}) {
-            assertFalse(frame.contains(mutation), "Receipt-only scope must not mutate pickup or infer retained authority: " + mutation);
+        for (String mutation : new String[] {"TriState.TRUE", "setCount(", "split(", "setItem(", "playerTouch(", "ExecutionToken.active()"}) {
+            assertFalse(frame.contains(mutation), "Scoped guard must not grant pickup, mutate inventory or infer authority: " + mutation);
         }
     }
 }

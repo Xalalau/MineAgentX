@@ -33,6 +33,9 @@ public abstract class CompanionTask<R extends TaskRecord> {
     /** Called every server tick while the task is running. Override in subclasses. */
     protected abstract TaskState onTick();
 
+    /** Final cleanup is distinct from a reversible survival interruption. */
+    protected void onFinish() { onInterrupt(); }
+
     /** Called when the task is interrupted by a higher-priority chain. Override in subclasses. */
     protected abstract void onInterrupt();
 
@@ -47,6 +50,9 @@ public abstract class CompanionTask<R extends TaskRecord> {
 
     /** Interrupt the task. Called by the scheduler when preempted. */
     public final void interrupt() { onInterrupt(); }
+
+    /** Finish permanently; legacy tasks retain exactly their interruption cleanup. */
+    public final void finish() { onFinish(); }
 
     /**
      * Return executor-grounded progress for status, planning and recovery.

@@ -46,15 +46,16 @@ public class CollectItemsTask extends CompanionTask<CollectItemsTool.CollectItem
                             Map.entry("cancelled", "Collection cancelled: observed {0}/{1} items; remaining {2}."),
                             Map.entry("timeout", "Collection timed out: observed {0}/{1} items; remaining {2}."),
                             Map.entry("unverified", "No further verified pickup."),
+                            Map.entry("unverified_budget", "An attempted pickup has no corroborated receipt; further collection stopped to preserve the request limit."),
                             Map.entry("navigation_failure", "Navigation to item failed: {0}"),
                             Map.entry("inventory_refused", "Item could not enter inventory."),
                             Map.entry("no_items", "No eligible items found within radius {0}."),
                             Map.entry("no_reachable", "No reachable items found."),
-                            Map.entry("unsafe_partial", "Partial pickup refused: target stack {0} exceeds remaining request {1}; the original entity was not modified. Automatic pickup is not capped by this task."),
+                            Map.entry("unsafe_partial", "Partial pickup refused: target stack {0} exceeds remaining request {1}; the original entity was not modified. Automatic pickup outside authorized collection remains vanilla."),
                             Map.entry("collecting", "Collecting {0}"),
                             Map.entry("nearby", "nearby items"),
                             Map.entry("intent_goal", "Collect nearby dropped items"),
-                            Map.entry("intent_outcome", "Complete only after target pickup post-events are corroborated by matching item/component inventory gain; never split entities to enforce a cap. Automatic pickup may be unobserved and exceed the request."),
+                            Map.entry("intent_outcome", "Complete only after target pickup post-events are corroborated by matching item/component inventory gain; never split entities to enforce a cap. Only exact retained work is fenced; automatic pickup outside it remains vanilla."),
                             Map.entry("protect_terrain", "Do not alter terrain merely to collect a dropped item"),
                             Map.entry("pickup_limit", "Counts cover only task-observed pickups; automatic pickup outside this task may be unobserved and exceed the request.")
                     ),
@@ -64,15 +65,16 @@ public class CollectItemsTask extends CompanionTask<CollectItemsTool.CollectItem
                             Map.entry("cancelled", "Coleta cancelada: observados {0}/{1} itens; faltam {2}."),
                             Map.entry("timeout", "Tempo de coleta esgotado: observados {0}/{1} itens; faltam {2}."),
                             Map.entry("unverified", "Nenhuma outra coleta verificada."),
+                            Map.entry("unverified_budget", "Uma tentativa de coleta ficou sem recibo confirmado; novas coletas foram interrompidas para preservar o limite do pedido."),
                             Map.entry("navigation_failure", "Falha na navegação até o item: {0}"),
                             Map.entry("inventory_refused", "O item não pôde entrar no inventário."),
                             Map.entry("no_items", "Nenhum item elegível encontrado no raio {0}."),
                             Map.entry("no_reachable", "Nenhum item acessível encontrado."),
-                            Map.entry("unsafe_partial", "Coleta parcial recusada: a pilha-alvo de {0} excede os {1} itens restantes; a entidade original não foi modificada. A coleta automática não é limitada por esta tarefa."),
+                            Map.entry("unsafe_partial", "Coleta parcial recusada: a pilha-alvo de {0} excede os {1} itens restantes; a entidade original não foi modificada. A coleta automática fora da coleta autorizada mantém o comportamento normal do jogo."),
                             Map.entry("collecting", "Coletando {0}"),
                             Map.entry("nearby", "itens próximos"),
                             Map.entry("intent_goal", "Coletar itens próximos no chão"),
-                            Map.entry("intent_outcome", "Concluir somente após confirmar eventos de coleta do alvo por ganho no inventário com item e componentes correspondentes; nunca dividir entidades para impor um limite. A coleta automática pode não ser observada e exceder o pedido."),
+                            Map.entry("intent_outcome", "Concluir somente após confirmar eventos de coleta do alvo por ganho no inventário com item e componentes correspondentes; nunca dividir entidades para impor um limite. Somente o trabalho com autorização retida exata é limitado; a coleta automática fora dele mantém o comportamento normal do jogo."),
                             Map.entry("protect_terrain", "Não alterar o terreno apenas para coletar um item no chão"),
                             Map.entry("pickup_limit", "As quantidades abrangem apenas coletas observadas pela tarefa; a coleta automática fora dela pode não ser observada e exceder o pedido.")
                     )
@@ -89,7 +91,9 @@ public class CollectItemsTask extends CompanionTask<CollectItemsTool.CollectItem
     private PlayerNav nav;
     private Phase phase;
     private int collectedCount;
+    private int reservedPickupCount;
     private boolean observingCollisions;
+    private boolean terminal;
     private ItemEntity currentItem;
     private final Set<UUID> unreachableItems = new HashSet<>();
     private int waitTicks;
@@ -103,8 +107,10 @@ public class CollectItemsTask extends CompanionTask<CollectItemsTool.CollectItem
     @Override
     protected void onStart() {
         observingCollisions = true;
+        terminal = false;
         phase = Phase.SCAN;
         collectedCount = 0;
+        reservedPickupCount = 0;
         currentItem = null;
         waitTicks = 0;
         failReason = null;
@@ -148,6 +154,17 @@ public class CollectItemsTask extends CompanionTask<CollectItemsTool.CollectItem
 
     @Override
     protected TaskState onTick() {
+        if (!pickupAuthorityActive()) {
+            cancelNav();
+            return TaskState.CANCELLED;
+        }
+        if (reservedPickupCount > 0) {
+            failReason = "unverified_budget";
+            failArguments = new Object[0];
+            phase = Phase.DONE;
+            cancelNav();
+            return TaskState.FAILED;
+        }
         if (phase == Phase.DONE) {
             return collectedCount >= record.maxCount ? TaskState.SUCCESS : TaskState.FAILED;
         }
@@ -307,9 +324,12 @@ public class CollectItemsTask extends CompanionTask<CollectItemsTool.CollectItem
                 : sp.getBoundingBox().inflate(1.0, 0.5, 1.0);
         if (!pickupBox.intersects(currentItem.getBoundingBox())) return;
 
-        if (CollectionCollisionFrame.observes(this)) {
-            currentItem.playerTouch(sp);
-            TaskContext.syncInventory(sp);
+        if (CollectionCollisionFrame.observes(this) || capsCollisions()) {
+            try (var collisionFrame = CollectionCollisionFrame.open(this)) {
+                currentItem.playerTouch(sp);
+            } finally {
+                TaskContext.syncInventory(sp);
+            }
             return;
         }
 
@@ -342,7 +362,33 @@ public class CollectItemsTask extends CompanionTask<CollectItemsTool.CollectItem
         cancelNav();
     }
 
-    boolean observesCollisions() { return observingCollisions; }
+    @Override
+    protected void onFinish() {
+        terminal = true;
+        onInterrupt();
+    }
+
+    boolean fencesTerminalCollisions() { return terminal && capsCollisions(); }
+
+    boolean observesCollisions() { return observingCollisions && pickupAuthorityActive(); }
+
+    boolean pickupAuthorityActive() {
+        return !record.requiresRetainedAuthority() || record.retainedAuthorityActive();
+    }
+
+    boolean capsCollisions() { return record.requiresRetainedAuthority() && record.retainedAuthorityActive(); }
+
+    boolean reserveCollisionPickup(int amount) {
+        if (terminal || amount <= 0 || amount > record.maxCount - collectedCount - reservedPickupCount) return false;
+        reservedPickupCount += amount;
+        return true;
+    }
+
+    void settleCollisionPickup(int reserved, int delivered) {
+        // Uncorroborated attempts retain their entire reservation, never a receipt.
+        if (delivered > 0) reservedPickupCount -= reserved;
+        recordCollisionPickup(delivered);
+    }
 
     boolean coversCollision(ItemEntity item) {
         return record.itemId == null || McCompat.isItem(item.getItem(), record.itemId);

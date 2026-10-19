@@ -11,13 +11,14 @@ import java.util.IdentityHashMap;
 import java.util.Map;
 import java.util.function.Consumer;
 
-/** Passive, synchronous collision receipts. This scope never authorizes or caps pickup. */
+/** Synchronous receipts and conservative request fencing for exactly retained work. */
 public final class CollectionCollisionFrame implements AutoCloseable {
     private static final ThreadLocal<CollectionCollisionFrame> CURRENT = new ThreadLocal<>();
     private final CollectionCollisionFrame previous;
     private final CollectItemsTask task;
     private final ServerPlayer player;
-    private final Map<ItemEntity, CollectionPickupObservation> attempts = new IdentityHashMap<>();
+    private record Attempt(CollectionPickupObservation observation, int reserved) {}
+    private final Map<ItemEntity, Attempt> attempts = new IdentityHashMap<>();
     private final Consumer<ItemEntityPickupEvent.Pre> pre = this::before;
     private final Consumer<ItemEntityPickupEvent.Post> post = this::after;
     private boolean closed;
@@ -43,6 +44,12 @@ public final class CollectionCollisionFrame implements AutoCloseable {
         return new CollectionCollisionFrame(collection);
     }
 
+    /** Span auction and physics, including a task that may resume or finish in that auction. */
+    public static CollectionCollisionFrame openTick(CompanionTask<?> task) {
+        if (!(task instanceof CollectItemsTask collection) || observes(collection)) return null;
+        return new CollectionCollisionFrame(collection);
+    }
+
     static boolean observes(CollectItemsTask task) {
         CollectionCollisionFrame frame = CURRENT.get();
         return frame != null && !frame.closed && frame.task == task;
@@ -50,24 +57,35 @@ public final class CollectionCollisionFrame implements AutoCloseable {
 
     private boolean accepts(net.minecraft.world.entity.player.Player player, ItemEntity entity) {
         return !closed && CURRENT.get() == this && player == this.player
-                && task.observesCollisions() && task.coversCollision(entity);
+                && (task.observesCollisions() || task.fencesTerminalCollisions()) && task.coversCollision(entity);
     }
 
     private void before(ItemEntityPickupEvent.Pre event) {
-        if (accepts(event.getPlayer(), event.getItemEntity())) {
-            attempts.put(event.getItemEntity(),
-                    new CollectionPickupObservation(event.getItemEntity(), player.getInventory()));
+        if (!accepts(event.getPlayer(), event.getItemEntity()) || event.canPickup().isFalse()) return;
+        ItemEntity entity = event.getItemEntity();
+        if (!event.canPickup().isTrue() && (entity.hasPickUpDelay()
+                || entity.getTarget() != null && !entity.getTarget().equals(player.getUUID()))) return;
+        int reserved = 0;
+        if (task.capsCollisions()) {
+            reserved = entity.getItem().getCount();
+            if (!task.reserveCollisionPickup(reserved)) {
+                // Never grant pickup, split stacks or change another player's policy.
+                event.setCanPickup(net.neoforged.neoforge.common.util.TriState.FALSE);
+                return;
+            }
         }
+        attempts.put(entity, new Attempt(
+                new CollectionPickupObservation(event.getItemEntity(), player.getInventory()), reserved));
     }
 
     private void after(ItemEntityPickupEvent.Post event) {
         if (closed || CURRENT.get() != this || event.getPlayer() != player
                 || !task.observesCollisions()) return;
-        CollectionPickupObservation observation = attempts.remove(event.getItemEntity());
-        if (observation == null) return;
-        observation.record(event);
+        Attempt attempt = attempts.remove(event.getItemEntity());
+        if (attempt == null) return;
+        attempt.observation().record(event);
         // Corroborate while still inside Post, before vanilla resets a consumed stack.
-        task.recordCollisionPickup(observation.delivered());
+        task.settleCollisionPickup(attempt.reserved(), attempt.observation().delivered());
     }
 
     @Override public void close() {

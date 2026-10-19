@@ -40,15 +40,18 @@ final class CollectionRetainedAuthorityTest {
             var lease = (ExecutionOwner.Lease) invoke(execution, "lease", new Class<?>[0]);
             assertEquals(ExecutionProtocol.State.COMPLETED, lease.call().terminal().state());
             assertFalse(lease.call().active()); assertTrue(lease.active());
+            assertTrue(record.requiresRetainedAuthority());
             assertTrue(retained(record), "RETAINED_AUTHORITY: real queued record must retain the admitted lease after async ack");
             f.loop.onOwnerMessage("ordinary speech preserves admitted collection");
             assertTrue(retained(record));
             assertTrue(((ExecutionOwner) field(f.loop, "executionOwner")).revoke("same-id", "fixture explicit revocation"));
             assertFalse(retained(record));
+            assertTrue(record.requiresRetainedAuthority(), "Revoked work must never fall back to unbound legacy behavior");
             var replacement = dispatch(f, prepare(f, "same-id"));
             assertTrue(retained(replacement)); assertFalse(retained(record), "ID reuse cannot revive the old record");
             var outside = new CollectItemsTool.CollectItemsTaskRecord("same-id", "minecraft:stone", 8, 5);
             assertFalse(retained(outside), "Unbound legacy invocation must not acquire cap authority");
+            assertFalse(outside.requiresRetainedAuthority());
             f.loop.pause(); assertFalse(retained(replacement));
         } finally { CompanionTickDispatcher.drain(); }
     }

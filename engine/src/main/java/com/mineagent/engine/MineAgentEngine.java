@@ -1177,39 +1177,39 @@ public final class MineAgentEngine {
                 state.lifecycle.onDeath(state.companion);
             }
 
-            if (!state.lifecycle.isDead() && !state.lifecycle.isPaused()) {
-                state.auction.tick();
-            }
-
-            // ── CRITICAL FIX: Explicitly tick the fake player's connection ──
-            //
-            // Root cause of "AI doesn't move": In 1.21.x, ServerGamePacketListenerImpl.tick()
-            // is NOT called by PlayerList.tickAllPlayers(). It is called by:
-            //   Connection.tick() ← ServerConnectionListener.tick()
-            //   ← MinecraftServer.tickConnection()
-            //
-            // ServerConnectionListener iterates its internal `connections` list,
-            // which only contains real network connections. Our FakeConnection is
-            // manually created and never registered to ServerConnectionListener,
-            // so FakePlayerNetworkHandler.tick() was NEVER called.
-            //
-            // Without connection.tick(), ServerPlayer.doTick() is never invoked, so
-            // means LivingEntity.tick() → aiStep() → travel() never runs, so
-            // movement physics (reading zza/xxa set by the pathing system) are
-            // never applied. The companion stands still forever regardless of
-            // what inputs the pathing system sets.
-            //
-            // Fix: explicitly call connection.tick() here, AFTER auction.tick()
-            // (which sets the movement inputs via MoveToTask → PlayerNav →
-            // PathExecutor → ExecHarness → CompanionInputDriver.setForward).
-            // This ensures inputs are set first, then physics are applied in
-            // the same tick — zero-latency movement.
-            //
-            // We call connection.tick() instead of doTick() directly so
-            // that FakePlayerNetworkHandler's keep-alive logic also runs.
-            try (var collisionFrame = com.mineagent.engine.task.CollectionCollisionFrame.open(
+            try (var collisionFrame = com.mineagent.engine.task.CollectionCollisionFrame.openTick(
                     state.lifecycle.isPaused() || state.lifecycle.isDead()
-                            ? null : state.auction.physicalTask())) {
+                            ? null : state.auction.physicalFrameTask())) {
+                if (!state.lifecycle.isDead() && !state.lifecycle.isPaused()) {
+                    state.auction.tick();
+                }
+
+                // ── CRITICAL FIX: Explicitly tick the fake player's connection ──
+                //
+                // Root cause of "AI doesn't move": In 1.21.x, ServerGamePacketListenerImpl.tick()
+                // is NOT called by PlayerList.tickAllPlayers(). It is called by:
+                //   Connection.tick() ← ServerConnectionListener.tick()
+                //   ← MinecraftServer.tickConnection()
+                //
+                // ServerConnectionListener iterates its internal `connections` list,
+                // which only contains real network connections. Our FakeConnection is
+                // manually created and never registered to ServerConnectionListener,
+                // so FakePlayerNetworkHandler.tick() was NEVER called.
+                //
+                // Without connection.tick(), ServerPlayer.doTick() is never invoked, so
+                // means LivingEntity.tick() → aiStep() → travel() never runs, so
+                // movement physics (reading zza/xxa set by the pathing system) are
+                // never applied. The companion stands still forever regardless of
+                // what inputs the pathing system sets.
+                //
+                // Fix: explicitly call connection.tick() here, AFTER auction.tick()
+                // (which sets the movement inputs via MoveToTask → PlayerNav →
+                // PathExecutor → ExecHarness → CompanionInputDriver.setForward).
+                // This ensures inputs are set first, then physics are applied in
+                // the same tick — zero-latency movement.
+                //
+                // We call connection.tick() instead of doTick() directly so
+                // that FakePlayerNetworkHandler's keep-alive logic also runs.
                 // Do not advance vanilla's death timer. ServerPlayer.doTick()
                 // eventually removes a dead entity, while this mod revives the
                 // same body in place. Paused-but-alive bodies still need normal

@@ -32,6 +32,9 @@ public final class ExecutionToken {
         };
     }
 
+    /** Whether the current admitted invocation supplied a retained authority binding. */
+    public static boolean retainedAuthorityBound() { return RETAINED.get() != null; }
+
     /** Capture now for queued work; an unbound caller receives no retained authority. */
     public static BooleanSupplier captureRetainedAuthority() {
         BooleanSupplier authority = RETAINED.get();

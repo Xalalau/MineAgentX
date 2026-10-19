@@ -220,6 +220,9 @@ public class PriorityAuction {
         return taskPaused ? null : currentTask;
     }
 
+    /** Capture the candidate before auction; the executor rechecks pause/resume live. */
+    public CompanionTask<?> physicalFrameTask() { return currentTask; }
+
     public void cancelTask() {
         if (currentTask != null) finishCurrentTask(TaskState.CANCELLED, null);
     }
@@ -239,7 +242,7 @@ public class PriorityAuction {
         taskPaused = false;
 
         try {
-            task.interrupt();
+            task.finish();
         } catch (Exception cleanupError) {
             System.err.println(SchedulerMessages.text("log.task.cleanup", String.valueOf(cleanupError.getMessage())));
         }
