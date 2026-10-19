@@ -145,6 +145,17 @@ Batch `deleg_5c0e6e83`: both children have returned released handoffs, reviewed 
 
 Coordinator keeps shared docs/Git, Engine/scheduler/execution contracts and sole Gradle ownership of the main checkout. The loaded-test child may run Gradle **only in its isolated project**, never compiling current principal sources; the identity child uses a snapshotted dependency JAR and explicit owned-source standalone compilation. All artifacts/worlds/logs stay in each assigned ignored directory. Neither child may touch host/launcher/models, change configuration outside the fixture, commit, push or close tracked acceptance items. Await released handoffs before a new main-suite/JAR verification.
 
+## Active follow-up ownership after identity commit
+
+Identity-idle consumer is locally committed as `9656e71` with the verified 746-test artifact below. No push. New batch `deleg_a91849c0` is running; it supersedes the historical ownership table above.
+
+| Child | Exclusive scope | Recovery/result |
+| --- | --- | --- |
+| `sa-0-9e43c19c` | CollectItemsTask/CollectionPickupObservation/new collision helpers and tests, minimal Engine physical-frame seam, indispensable collection Task/TaskRecord and PriorityAuction lifecycle distinction, optional passive exact-authority capture in ExecutionToken | `.tools/collection-collision-fix/HANDOFF.md`; true loaded RED -> small receipt/cap/authority/lifecycle slices. No AgentLoop/identity/SkillRuntime/ExecutionOwner/protocol semantics or shared docs/Git/main Gradle. |
+| `sa-1-6112fb04` | Read-only command tree and immediate language producers; no principal-source writes or compilation | `.tools/command-language-review/HANDOFF.md`; enumerate actual slash commands, identify missing EN/PT producers and propose next executable RED, without claiming implementation. |
+
+Parent keeps shared documentation/checklist/Git and main Gradle. Do not compile the principal checkout while the collection owner writes; require a released handoff before the next full suite/JAR. Collector may run only isolated Gradle with resolved cached dependencies and asset download disabled before preparation. It must snapshot the immutable current JAR (`fdf7a2a95d51ffbbfbcd13d334ae2a6888216c23fd5b2cb27fa78b6dad236cbc`), preserve original loaded-control/RED inputs and use task-local overlays for its owned corrected classes. No model/assets downloads, host/launcher/external game server, synthetic loader/Post, stack cloning/splitting/padding or cross-tick pseudo-receipts. Command auditor has no write ownership overlapping Engine. Neither child closes acceptance or commits.
+
 ## Identity-idle integration: latest 746-test checkpoint
 
 - Both handoffs from `deleg_5c0e6e83` are received/released/reviewed. Parent inspected AgentLoop, IdentityIdleContext and revision/policy/arbitration tests. Exact released hashes match all seven production/test files. The mutation-verifier warning was checked against the actual IdentityIdleRevisionTest: its SHA-256 matches the release manifest and its four behavioral cases pass in the integrated run; no missing final file or silent patch repair is assumed.
