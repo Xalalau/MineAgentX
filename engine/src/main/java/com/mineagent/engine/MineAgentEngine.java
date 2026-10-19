@@ -1206,7 +1206,9 @@ public final class MineAgentEngine {
             //
             // We call connection.tick() instead of doTick() directly so
             // that FakePlayerNetworkHandler's keep-alive logic also runs.
-            try {
+            try (var collisionFrame = com.mineagent.engine.task.CollectionCollisionFrame.open(
+                    state.lifecycle.isPaused() || state.lifecycle.isDead()
+                            ? null : state.auction.physicalTask())) {
                 // Do not advance vanilla's death timer. ServerPlayer.doTick()
                 // eventually removes a dead entity, while this mod revives the
                 // same body in place. Paused-but-alive bodies still need normal

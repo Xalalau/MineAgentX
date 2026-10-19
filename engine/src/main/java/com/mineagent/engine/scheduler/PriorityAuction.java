@@ -215,6 +215,11 @@ public class PriorityAuction {
         return currentTask != null;
     }
 
+    /** Passive physical observations must not attribute survival pickup to a paused task. */
+    public CompanionTask<?> physicalTask() {
+        return taskPaused ? null : currentTask;
+    }
+
     public void cancelTask() {
         if (currentTask != null) finishCurrentTask(TaskState.CANCELLED, null);
     }

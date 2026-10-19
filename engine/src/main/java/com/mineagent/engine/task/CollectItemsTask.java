@@ -89,6 +89,7 @@ public class CollectItemsTask extends CompanionTask<CollectItemsTool.CollectItem
     private PlayerNav nav;
     private Phase phase;
     private int collectedCount;
+    private boolean observingCollisions;
     private ItemEntity currentItem;
     private final Set<UUID> unreachableItems = new HashSet<>();
     private int waitTicks;
@@ -101,6 +102,7 @@ public class CollectItemsTask extends CompanionTask<CollectItemsTool.CollectItem
 
     @Override
     protected void onStart() {
+        observingCollisions = true;
         phase = Phase.SCAN;
         collectedCount = 0;
         currentItem = null;
@@ -114,6 +116,7 @@ public class CollectItemsTask extends CompanionTask<CollectItemsTool.CollectItem
 
     @Override
     protected void onResume() {
+        observingCollisions = true;
         // Verified synchronous pickup receipts survive an interruption.
         // Entity references and paths do not.
         currentItem = null;
@@ -304,6 +307,12 @@ public class CollectItemsTask extends CompanionTask<CollectItemsTool.CollectItem
                 : sp.getBoundingBox().inflate(1.0, 0.5, 1.0);
         if (!pickupBox.intersects(currentItem.getBoundingBox())) return;
 
+        if (CollectionCollisionFrame.observes(this)) {
+            currentItem.playerTouch(sp);
+            TaskContext.syncInventory(sp);
+            return;
+        }
+
         var observation = new CollectionPickupObservation(currentItem, sp.getInventory());
         Consumer<ItemEntityPickupEvent.Post> listener = event -> {
             if (event.getPlayer() == sp) observation.record(event);
@@ -329,9 +338,18 @@ public class CollectItemsTask extends CompanionTask<CollectItemsTool.CollectItem
 
     @Override
     protected void onInterrupt() {
-        // Automatic pickup outside our observed touch is intentionally not
-        // attributed to this task.
+        observingCollisions = false;
         cancelNav();
+    }
+
+    boolean observesCollisions() { return observingCollisions; }
+
+    boolean coversCollision(ItemEntity item) {
+        return record.itemId == null || McCompat.isItem(item.getItem(), record.itemId);
+    }
+
+    void recordCollisionPickup(int delivered) {
+        collectedCount += delivered;
     }
 
     @Override
