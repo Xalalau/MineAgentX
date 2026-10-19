@@ -1,11 +1,14 @@
 package com.mineagent.engine.safety;
 
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionResult;
 import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
 import net.neoforged.neoforge.event.entity.living.LivingIncomingDamageEvent;
 import net.neoforged.neoforge.event.entity.player.AttackEntityEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.entity.player.SweepAttackEvent;
 
 /**
@@ -15,6 +18,15 @@ import net.neoforged.neoforge.event.entity.player.SweepAttackEvent;
 @EventBusSubscriber(modid = "mineagent")
 public final class CombatSafetyEvents {
     private CombatSafetyEvents() {}
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onItemUse(PlayerInteractEvent.RightClickItem event) {
+        if (event.getEntity() instanceof ServerPlayer player
+                && !HarmfulPotionSafety.permitsUse(player, event.getItemStack())) {
+            event.setCancellationResult(InteractionResult.FAIL);
+            event.setCanceled(true);
+        }
+    }
 
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public static void onAttack(AttackEntityEvent event) {
@@ -38,9 +50,15 @@ public final class CombatSafetyEvents {
     }
 
     @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onProjectileJoin(EntityJoinLevelEvent event) {
+        ProjectileProvenance.capture(event);
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
     public static void onIncomingDamage(LivingIncomingDamageEvent event) {
-        // DamageSource#getEntity is the responsible shooter, not just the arrow.
-        if (CombatSafety.isCompanion(event.getSource().getEntity())
+        // The live responsible shooter can vanish; direct projectile origin survives.
+        if ((CombatSafety.isCompanion(event.getSource().getEntity())
+                || ProjectileProvenance.hasCompanionOrigin(event.getSource().getDirectEntity()))
                 && !CombatSafety.permitsTarget(event.getEntity())) {
             event.setCanceled(true);
         }

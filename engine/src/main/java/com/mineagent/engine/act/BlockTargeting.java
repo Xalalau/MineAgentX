@@ -58,6 +58,8 @@ public final class BlockTargeting {
         if (player == null || pos == null || !Double.isFinite(reach) || reach <= 0.0) {
             return Optional.empty();
         }
+        reach = Math.min(reach, interactionReach(player));
+        if (reach <= 0.0) return Optional.empty();
         var level = player.level();
         var state = level.getBlockState(pos);
         if (state.isAir()) return Optional.empty();
@@ -170,13 +172,15 @@ public final class BlockTargeting {
                 ? ((BlockHitResult) hit).getBlockPos() : null;
     }
 
-    /** Use the fake player's configured reach when present. */
+    /** Live physical reach, capped by an intentional custom game-mode limit. */
     public static double interactionReach(ServerPlayer player) {
-        if (player != null && player.gameMode instanceof
+        if (player == null) return 0.0;
+        double reach = player.blockInteractionRange();
+        if (player.gameMode instanceof
                 com.mineagent.engine.entity.fakeplayer.FakePlayerGameMode fakeMode) {
-            return fakeMode.getReachDistance();
+            reach = Math.min(reach, fakeMode.getReachDistance());
         }
-        return player != null ? player.blockInteractionRange() : 0.0;
+        return Double.isFinite(reach) && reach > 0.0 ? reach : 0.0;
     }
 
     private record Candidate(Vec3 clickPoint, Vec3 rayEnd, double distanceSquared) {}

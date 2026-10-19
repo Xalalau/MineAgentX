@@ -114,7 +114,7 @@ Discovery validates the complete selection before changing visibility. Unknown o
 
 - Eat automatically according to configured hunger thresholds and safe available food.
 - Seek air and react to drowning risk.
-- Attempt water-bucket fall mitigation when conditions and equipment allow.
+- Automatic water-bucket fall mitigation is disabled until an isolated authorized flow region and durable source provenance can be verified. It receives no body priority and cannot place/recover water; deliberate bucket tools retain their normal path.
 - Defend against mobs and react to danger, including configured creeper avoidance.
 - Pick up items according to configuration.
 - Follow the owner or operate in free mode.
@@ -122,7 +122,9 @@ Discovery validates the complete selection before changing visibility. Unknown o
 - Perform idle head movement, arm swings, and small collision-aware shuffles.
 - Run body/survival control independently from slow model requests; tactical observations and open-ended LLM planning operate at different rates.
 
-These mechanisms reduce latency for immediate reactions but are not guarantees of survival.
+These mechanisms reduce latency for immediate reactions but are not guarantees of survival. Automatic navigation support accepts only opted-in inert vanilla full cubes, consistently for material counting and placement; it excludes TNT, redstone blocks and unknown/modded materials without restricting deliberate construction to that list. Inert support can still affect surrounding circuits or fluids. Placement uses the live block-interaction attribute capped by any tighter custom game-mode limit, and checks the clicked support with zero packet tolerance.
+
+Companion attacks on players/companions are denied by default and controlled by the server combat policy. Harmful or neutral splash/lingering potion effects are blocked at emission while either protected-target permission is disabled; base and custom effects are checked. Both permissions explicitly enabled allow emission. Safe/common item use and ordinary human attacks are not globally prohibited. Server-authenticated companion projectile origin persists in NBT and is evaluated against the current impact policy even after its shooter disappears. This does not recover unmarked legacy projectiles, guarantee custom modded damage attribution, or retroactively filter existing clouds/effects after a policy change.
 
 ## 3. Planning, memory, and autonomy
 

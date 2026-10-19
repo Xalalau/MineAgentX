@@ -1,6 +1,7 @@
 package com.mineagent.engine.act;
 
 import com.mineagent.engine.safety.CombatSafety;
+import com.mineagent.engine.safety.HarmfulPotionSafety;
 import net.minecraft.commands.arguments.EntityAnchorArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
@@ -212,7 +213,7 @@ public final class Interaction {
             if (player == null || hand == null) return false;
 
             ItemStack heldItem = player.getItemInHand(hand);
-            if (heldItem.isEmpty()) return false;
+            if (heldItem.isEmpty() || !HarmfulPotionSafety.permitsUse(player, heldItem)) return false;
 
             // Use the game mode handler for item use
             InteractionResult result = player.gameMode.useItem(

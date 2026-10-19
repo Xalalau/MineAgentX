@@ -16,7 +16,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.Vec3;
 
-/** Emergency water-bucket landing with verified placement and recovery. */
+/** Emergency water-bucket reflex, disabled until fluid authority is verifiable. */
 public final class MLGChain implements TaskChain {
 
     private static final float PRIORITY = 10.0f;
@@ -48,6 +48,7 @@ public final class MLGChain implements TaskChain {
 
     @Override
     public float getPriority(AgentPlayer companion) {
+        if (!automaticFluidMutationAuthorized()) return Float.NEGATIVE_INFINITY;
         try {
             if (phase != Phase.IDLE) return PRIORITY;
             ServerPlayer sp = ((CompanionEntity) companion).serverPlayer();
@@ -69,6 +70,7 @@ public final class MLGChain implements TaskChain {
 
     @Override
     public void tick(AgentPlayer companion) {
+        if (!automaticFluidMutationAuthorized()) return;
         ServerPlayer sp = ((CompanionEntity) companion).serverPlayer();
         try {
             // MLG owns the body exclusively and must not inherit movement that
@@ -113,6 +115,7 @@ public final class MLGChain implements TaskChain {
     }
 
     private void placeWhenReachable(ServerPlayer sp) {
+        if (!automaticFluidMutationAuthorized()) return;
         phaseTicks++;
         if (!sp.getMainHandItem().is(Items.WATER_BUCKET)) {
             bodyLog.report(ExecutorMessages.text("body.mlg.lost"));
@@ -171,6 +174,7 @@ public final class MLGChain implements TaskChain {
     }
 
     private void recoverWater(ServerPlayer sp) {
+        if (!automaticFluidMutationAuthorized()) return;
         phaseTicks++;
         if (!waterPlaced || waterPos == null
                 || !sp.level().getFluidState(waterPos).is(FluidTags.WATER)) {
@@ -236,6 +240,14 @@ public final class MLGChain implements TaskChain {
             if (inventory.getItem(i).is(Items.WATER_BUCKET)) return i;
         }
         return -1;
+    }
+
+    private static boolean automaticFluidMutationAuthorized() {
+        // No bounded isolated flow region, explicit authorization, or durable
+        // source provenance exists here. Urgency and same-fluid observations
+        // establish none of these. Fail closed only for this automatic reflex;
+        // deliberate bucket tools retain their own interaction path.
+        return false;
     }
 
     private static Landing findLanding(ServerPlayer player) {

@@ -33,10 +33,6 @@ public final class Placement {
             Direction.UP
     };
 
-    /** Maximum reach distance for placing blocks. */
-    private static final double REACH_SURVIVAL = 4.5;
-    private static final double REACH_CREATIVE = 5.0;
-
     private Placement() {}
 
     /** Result of a verified vanilla placement attempt. */
@@ -138,9 +134,10 @@ public final class Placement {
     }
 
     /**
-     * Place any inventory block suitable as a walking support.
-     * Falling blocks are excluded because a bridge block placed over a void
-     * would immediately fall and leave the planned edge physically absent.
+     * Place a conservatively opted-in inert inventory block for navigation.
+     * The same selector governs the path material budget. This material rule
+     * excludes active/unstable blocks; it does not authorize indirect changes
+     * to surrounding circuits or fluids and is not used for explicit building.
      */
     public static boolean placeAnySupportBlock(ServerPlayer player, BlockPos pos) {
         if (player == null || pos == null) return false;
@@ -217,7 +214,7 @@ public final class Placement {
                     || supportState.getCollisionShape(level, support).isEmpty()) {
                 continue;
             }
-            if (!player.canInteractWithBlock(support, 1.0)) {
+            if (!player.canInteractWithBlock(support, 0.0)) {
                 lastFailure = "support face is outside interaction reach";
                 continue;
             }
@@ -470,10 +467,7 @@ public final class Placement {
      * @return true if within reach
      */
     private static boolean isWithinReach(ServerPlayer player, BlockPos pos) {
-        double reach = player.gameMode instanceof
-                com.mineagent.engine.entity.fakeplayer.FakePlayerGameMode fakeMode
-                ? fakeMode.getReachDistance()
-                : (player.isCreative() ? REACH_CREATIVE : REACH_SURVIVAL);
+        double reach = BlockTargeting.interactionReach(player);
         double dx = pos.getX() + 0.5 - player.getX();
         double dy = pos.getY() + 0.5 - player.getEyeY();
         double dz = pos.getZ() + 0.5 - player.getZ();
@@ -489,15 +483,16 @@ public final class Placement {
     }
 
     private static boolean isSafeSupportMaterial(Block block, BlockState state) {
-        if (block instanceof net.minecraft.world.level.block.FallingBlock
-                || block instanceof net.minecraft.world.level.block.EntityBlock) {
-            return false;
-        }
-        // Direct setBlock is used only for structural movement support. Limit
-        // it to full collision cubes so slabs, fences, interactive block
-        // entities, and orientation-sensitive blocks do not create a support
-        // whose actual standing height/state disagrees with the A* node.
-        return state.isCollisionShapeFullBlock(
-                net.minecraft.world.level.EmptyBlockGetter.INSTANCE, BlockPos.ZERO);
+        // Automatic navigation chooses materials, unlike deliberate building.
+        // Identity-based opt-in excludes active and unknown/modded blocks even
+        // when they have a full collision cube. This is not authorization for
+        // surrounding circuit/fluid changes: inert cubes can still affect them.
+        boolean inert = block == Blocks.COBBLESTONE || block == Blocks.STONE
+                || block == Blocks.DIRT || block == Blocks.COBBLED_DEEPSLATE
+                || block == Blocks.DEEPSLATE || block == Blocks.NETHERRACK
+                || block == Blocks.END_STONE;
+        return inert && state != null && state.is(block)
+                && state.isCollisionShapeFullBlock(
+                        net.minecraft.world.level.EmptyBlockGetter.INSTANCE, BlockPos.ZERO);
     }
 }
