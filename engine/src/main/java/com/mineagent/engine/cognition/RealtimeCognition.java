@@ -1,5 +1,7 @@
 package com.mineagent.engine.cognition;
 
+import com.mineagent.engine.i18n.ContextMessages;
+
 import com.mineagent.api.entity.AgentPlayer;
 import com.mineagent.engine.theory.TheoryOfMind;
 import net.minecraft.server.level.ServerPlayer;
@@ -87,8 +89,8 @@ public final class RealtimeCognition {
     public String summarizeForPrompt() {
         SituationSnapshot frame = latestFrame.get();
         TacticalDecision decision = latestDecision.get();
-        if (frame == null) return "Realtime cognition: awaiting first server frame\n";
-        StringBuilder out = new StringBuilder("Realtime cognition (server evidence):\n");
+        if (frame == null) return ContextMessages.text("realtime.empty");
+        StringBuilder out = new StringBuilder(ContextMessages.text("realtime.heading"));
         out.append("- tactical=").append(decision.compact())
                 .append(" local_control=").append(decision.localControlRequired())
                 .append(" deliberation=").append(decision.deliberationRequired()).append('\n');
@@ -109,7 +111,7 @@ public final class RealtimeCognition {
                         .append(String.join(" | ", recentEvents)).append('\n');
             }
         }
-        out.append("Local tactical/survival control does not need an LLM tool call; deliberate only when the frame says deliberation=true.\n");
+        out.append(ContextMessages.text("realtime.advice"));
         return out.toString();
     }
 
@@ -168,7 +170,7 @@ public final class RealtimeCognition {
         if (signature.equals(lastDeliberationSignature)) return null;
         lastDeliberationSignature = signature;
         return "[COGNITION_DECISION] " + decision.compact()
-                + "; executor evidence invalidated the current action. Replan from live evidence instead of retrying unchanged.";
+                + ContextMessages.text("cognition.replanAdvice");
     }
 
     private static OwnerIntentSignal inferOwnerIntent(ServerPlayer owner,

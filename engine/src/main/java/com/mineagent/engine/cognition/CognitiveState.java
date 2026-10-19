@@ -1,5 +1,7 @@
 package com.mineagent.engine.cognition;
 
+import com.mineagent.engine.i18n.ContextMessages;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -126,8 +128,8 @@ public final class CognitiveState {
     /** Compact diagnostic context for the LLM; newest semantic entries first. */
     public synchronized String summarizeForPrompt(int limit) {
         int max = Math.max(1, Math.min(24, limit));
-        if (events.isEmpty()) return "Cognitive ledger: empty\n";
-        StringBuilder out = new StringBuilder("Cognitive ledger (ordered evidence):\n");
+        if (events.isEmpty()) return ContextMessages.text("cognitive.empty");
+        StringBuilder out = new StringBuilder(ContextMessages.text("cognitive.heading"));
         events.stream().sorted(Comparator.comparingLong(Event::sequence).reversed())
                 .filter(event -> !"heartbeat".equals(event.type()))
                 .limit(max)

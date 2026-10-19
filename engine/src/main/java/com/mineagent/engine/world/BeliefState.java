@@ -1,5 +1,7 @@
 package com.mineagent.engine.world;
 
+import com.mineagent.engine.i18n.ContextMessages;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -91,25 +93,25 @@ public final class BeliefState {
     }
 
     public synchronized String summarizeForPrompt() {
-        if (rules.isEmpty() && facts.isEmpty()) return "Beliefs: no durable evidence yet";
-        StringBuilder out = new StringBuilder("Evidence-backed beliefs:\n");
+        if (rules.isEmpty() && facts.isEmpty()) return ContextMessages.text("belief.empty");
+        StringBuilder out = new StringBuilder(ContextMessages.text("belief.heading"));
         rules.values().stream()
                 .sorted(Comparator.comparing(RuleBelief::isContested).reversed()
                         .thenComparingLong(RuleBelief::lastObservedTick).reversed())
                 .limit(8)
                 .forEach(rule -> out.append("- ")
-                        .append(rule.action()).append(" in ").append(rule.context())
+                        .append(rule.action()).append(ContextMessages.text("belief.in")).append(rule.context())
                         .append(" -> ").append(rule.expectedOutcome())
-                        .append(" confidence=")
+                        .append(ContextMessages.text("field.confidence"))
                         .append(String.format(Locale.ROOT, "%.2f", rule.confidence()))
-                        .append(rule.isContested() ? " CONTESTED" : "")
-                        .append(" evidence=").append(rule.lastEvidence()).append('\n'));
+                        .append(rule.isContested() ? ContextMessages.text("belief.contested") : "")
+                        .append(ContextMessages.text("field.evidence")).append(rule.lastEvidence()).append('\n'));
         facts.values().stream()
                 .sorted(Comparator.comparingLong(Fact::gameTick).reversed())
                 .limit(5)
-                .forEach(fact -> out.append("- observed ").append(fact.subject())
+                .forEach(fact -> out.append(ContextMessages.text("belief.observed")).append(fact.subject())
                         .append(' ').append(fact.predicate()).append(' ')
-                        .append(fact.value()).append(" confidence=")
+                        .append(fact.value()).append(ContextMessages.text("field.confidence"))
                         .append(String.format(Locale.ROOT, "%.2f", fact.confidence()))
                         .append('\n'));
         return out.toString();

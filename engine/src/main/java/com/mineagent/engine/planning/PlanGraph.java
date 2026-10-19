@@ -1,5 +1,7 @@
 package com.mineagent.engine.planning;
 
+import com.mineagent.engine.i18n.ContextMessages;
+
 import com.mineagent.api.task.TaskSnapshot;
 import com.mineagent.api.task.TaskState;
 import com.mineagent.engine.world.SemanticWorldModel;
@@ -143,23 +145,22 @@ public final class PlanGraph {
         if (drafts != null) {
             for (DraftNode draft : drafts) {
                 if (draft == null || draft.id() == null || draft.id().isBlank()) {
-                    warnings.add("Plan contains a node without an id");
+                    warnings.add(ContextMessages.text("plan.noId"));
                     continue;
                 }
                 if (validated.putIfAbsent(draft.id(), draft) != null) {
-                    warnings.add("Duplicate step id '" + draft.id() + "'");
+                    warnings.add(ContextMessages.text("plan.duplicateId", draft.id()));
                 }
             }
         }
         for (DraftNode draft : validated.values()) {
             for (String dependency : draft.dependsOn()) {
                 if (!validated.containsKey(dependency)) {
-                    warnings.add("Step '" + draft.id() + "' depends on missing step '"
-                            + dependency + "'");
+                    warnings.add(ContextMessages.text("plan.missingDependency", draft.id(), dependency));
                 }
             }
         }
-        if (containsCycle(validated)) warnings.add("Plan dependency graph contains a cycle");
+        if (containsCycle(validated)) warnings.add(ContextMessages.text("plan.cycle"));
         if (!warnings.isEmpty()) {
             // Replacing a valid active plan with a malformed partial graph is
             // worse than rejecting the update. The caller can repair the
@@ -181,13 +182,11 @@ public final class PlanGraph {
                 if (requested == NodeStatus.VERIFIED
                         && evidence.stream().noneMatch(Evidence::success)) {
                     committed = NodeStatus.IN_PROGRESS;
-                    warnings.add("Step '" + draft.id()
-                            + "' was not marked verified because it has no successful executor evidence");
+                    warnings.add(ContextMessages.text("plan.notVerified", draft.id()));
                 }
                 if (committed == NodeStatus.IN_PROGRESS && ++inProgress > 1) {
                     committed = NodeStatus.PENDING;
-                    warnings.add("Only one step may control the body; step '"
-                            + draft.id() + "' was kept pending");
+                    warnings.add(ContextMessages.text("plan.oneBody", draft.id()));
                 }
                 replacement.put(draft.id(), new PlanNode(draft.id(), draft.description(),
                         draft.successCriterion(), draft.priority(), draft.dependsOn(), committed,
@@ -201,8 +200,7 @@ public final class PlanGraph {
                     && !dependenciesVerified(node.dependsOn(), replacement)) {
                 entry.setValue(replace(node, NodeStatus.PENDING, node.attempts(),
                         node.lastFailure(), node.evidence()));
-                warnings.add("Step '" + node.id()
-                        + "' cannot start before its dependencies are verified");
+                warnings.add(ContextMessages.text("plan.cannotStart", node.id()));
             }
         }
         nodes.clear();
@@ -253,8 +251,7 @@ public final class PlanGraph {
         for (DraftNode draft : validated.values()) {
             for (String dependency : draft.dependsOn()) {
                 if (!available.contains(dependency)) {
-                    warnings.add("Step '" + draft.id()
-                            + "' depends on missing or unverified step '" + dependency + "'");
+                    warnings.add(ContextMessages.text("plan.missingOrUnverified", draft.id(), dependency));
                 }
             }
         }
@@ -272,7 +269,7 @@ public final class PlanGraph {
             }
         }
         combined.putAll(validated);
-        if (containsCycle(combined)) warnings.add("Plan dependency graph contains a cycle");
+        if (containsCycle(combined)) warnings.add(ContextMessages.text("plan.cycle"));
         if (!warnings.isEmpty()) {
             return new UpdateResult(List.copyOf(warnings), revision, false);
         }
@@ -300,13 +297,11 @@ public final class PlanGraph {
             if (committed == NodeStatus.VERIFIED
                     && evidence.stream().noneMatch(Evidence::success)) {
                 committed = NodeStatus.PENDING;
-                warnings.add("Step '" + draft.id()
-                        + "' was not marked verified because it has no successful executor evidence");
+                warnings.add(ContextMessages.text("plan.notVerified", draft.id()));
             }
             if (committed == NodeStatus.IN_PROGRESS && ++inProgress > 1) {
                 committed = NodeStatus.PENDING;
-                warnings.add("Only one step may control the body; step '"
-                        + draft.id() + "' was kept pending");
+                warnings.add(ContextMessages.text("plan.oneBody", draft.id()));
             }
             replacement.put(draft.id(), new PlanNode(draft.id(), draft.description(),
                     draft.successCriterion(), draft.priority(), draft.dependsOn(),
@@ -511,30 +506,30 @@ public final class PlanGraph {
     }
 
     public synchronized String summarizeForPrompt() {
-        if (nodes.isEmpty()) return "Plan: none";
-        StringBuilder out = new StringBuilder("Plan goal: ").append(goal)
-                .append(" (revision ").append(revision).append(", ")
-                .append(progressPercent()).append("% verified, status=")
+        if (nodes.isEmpty()) return ContextMessages.text("plan.empty");
+        StringBuilder out = new StringBuilder(ContextMessages.text("plan.heading")).append(goal)
+                .append(ContextMessages.text("plan.revision")).append(revision).append(", ")
+                .append(progressPercent()).append(ContextMessages.text("plan.verified"))
                 .append(goalStatus.name().toLowerCase(java.util.Locale.ROOT))
-                .append(", repairs=").append(repairCount).append(")\n");
+                .append(ContextMessages.text("plan.repairs")).append(repairCount).append(")\n");
         for (PlanNode node : nodes.values()) {
             out.append("- [").append(node.status()).append("] ")
                     .append(node.id()).append(": ").append(node.description());
             if (!node.dependsOn().isEmpty()) {
                 out.append(" | depends_on=").append(String.join(",", node.dependsOn()));
             }
-            if (node.lastFailure() != null) out.append(" | blocker=").append(node.lastFailure());
+            if (node.lastFailure() != null) out.append(ContextMessages.text("field.blocker")).append(node.lastFailure());
             out.append('\n');
         }
         if (!constraints.isEmpty()) {
-            out.append("Constraints:\n");
+            out.append(ContextMessages.text("plan.constraints"));
             for (IntentContract.Constraint constraint : constraints) {
                 out.append("- ").append(constraint.kind()).append(": ")
                         .append(constraint.description()).append('\n');
             }
         }
         if (!goalConditions.isEmpty()) {
-            out.append("Goal acceptance conditions:\n");
+            out.append(ContextMessages.text("plan.acceptance"));
             for (GoalCondition condition : goalConditions) {
                 out.append("- ").append(condition.describe()).append('\n');
             }
@@ -653,11 +648,11 @@ public final class PlanGraph {
         if (drafts == null) return validated;
         for (DraftNode draft : drafts) {
             if (draft == null || draft.id() == null || draft.id().isBlank()) {
-                warnings.add("Plan contains a node without an id");
+                warnings.add(ContextMessages.text("plan.noId"));
                 continue;
             }
             if (validated.putIfAbsent(draft.id(), draft) != null) {
-                warnings.add("Duplicate step id '" + draft.id() + "'");
+                warnings.add(ContextMessages.text("plan.duplicateId", draft.id()));
             }
         }
         return validated;

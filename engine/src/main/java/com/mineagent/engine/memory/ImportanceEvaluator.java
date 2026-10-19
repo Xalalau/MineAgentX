@@ -1,5 +1,7 @@
 package com.mineagent.engine.memory;
 
+import com.mineagent.engine.i18n.ContextMessages;
+
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -274,7 +276,7 @@ public class ImportanceEvaluator {
                     }
                 });
         if (sb.length() == 0) return "";
-        return "What you consider important: " + sb;
+        return ContextMessages.text("importance.learned") + sb;
     }
 
     public int learnCount() { return learnCount.get(); }

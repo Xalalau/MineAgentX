@@ -1,5 +1,7 @@
 package com.mineagent.engine.memory;
 
+import com.mineagent.engine.i18n.ContextMessages;
+
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -105,8 +107,7 @@ public class ReflectionSystem {
      * Record a behavioral failure pattern (such as repeated failure on one task type).
      */
     public void recordPatternFailure(String pattern, int failureCount, String context) {
-        String lesson = "Repeated failure pattern detected: " + pattern +
-                " (" + failureCount + " occurrences). Consider changing strategy or asking for help.";
+        String lesson = ContextMessages.text("reflection.pattern", pattern, failureCount);
 
         addReflection(new Reflection(
                 "macro",
@@ -154,7 +155,7 @@ public class ReflectionSystem {
         if (recent.isEmpty()) return "";
 
         StringBuilder sb = new StringBuilder();
-        sb.append("## Lessons to remember\n");
+        sb.append(ContextMessages.text("reflection.heading"));
         // Latest 3 lessons (newest last)
         int start = Math.max(0, recent.size() - 3);
         for (int i = start; i < recent.size(); i++) {
@@ -173,10 +174,10 @@ public class ReflectionSystem {
         if (relevant.isEmpty()) return "";
 
         StringBuilder sb = new StringBuilder();
-        sb.append("## Relevant failure memories\n");
+        sb.append(ContextMessages.text("reflection.failures"));
         for (Reflection r : relevant) {
-            sb.append("- Task: ").append(truncate(r.trigger(), 30))
-              .append("\nLesson: ").append(r.lesson()).append("\n");
+            sb.append(ContextMessages.text("reflection.task")).append(truncate(r.trigger(), 30))
+              .append(ContextMessages.text("reflection.lesson")).append(r.lesson()).append("\n");
         }
         return sb.toString();
     }
@@ -237,7 +238,7 @@ public class ReflectionSystem {
         if (relevant.isEmpty()) return "";
 
         StringBuilder sb = new StringBuilder();
-        sb.append("## Lessons to remember\n");
+        sb.append(ContextMessages.text("reflection.heading"));
         for (Reflection r : relevant) {
             sb.append("- ").append(r.lesson()).append("\n");
         }
@@ -311,32 +312,30 @@ public class ReflectionSystem {
         // Parameter errors
         if (lower.contains("invalid") || lower.contains("illegal") ||
             lower.contains("missing") || lower.contains("required")) {
-            return "Tool " + toolName + " has invalid parameters. Check the parameter format and required fields. Current parameters: " +
-                    truncate(params, 30);
+            return ContextMessages.text("reflection.invalid", toolName, truncate(params, 30));
         }
         // Not found
         if (lower.contains("not found") || lower.contains("no such") ||
             lower.contains("cannot find")) {
-            return "Target not found. Scan the surroundings with look_around and confirm the target exists before retrying " + toolName + ".";
+            return ContextMessages.text("reflection.notFound", toolName);
         }
         // Access/permission issues
         if (lower.contains("cannot") || lower.contains("can't") ||
             lower.contains("unreachable") || lower.contains("denied")) {
-            return "Cannot execute " + toolName + ". Check whether the target is reachable, or try moving closer.";
+            return ContextMessages.text("reflection.access", toolName);
         }
         // Timeout
         if (lower.contains("timeout") || lower.contains("timed out")) {
-            return toolName + " timed out. The target may be too far away or the environment too complex; consider breaking down the task or changing strategy.";
+            return ContextMessages.text("reflection.timeout", toolName);
         }
         // State conflict
         if (lower.contains("already") || lower.contains("busy") ||
             lower.contains("locked")) {
-            return "Target state conflict. Wait for the current operation to finish or choose another target.";
+            return ContextMessages.text("reflection.conflict");
         }
 
         // General advice
-        return "Tool " + toolName + " failed: " + truncate(error, 40) +
-                ". Check the parameters and confirm the target state.";
+        return ContextMessages.text("reflection.toolFailed", toolName, truncate(error, 40));
     }
 
     /**
@@ -348,27 +347,26 @@ public class ReflectionSystem {
         // Task decomposition issues
         if (lowerReason.contains("too complex") || lowerReason.contains("too big") ||
             lowerReason.contains("overwhelming")) {
-            return "Task '" + truncate(taskDescription, 25) + "' is too complex. Try breaking it into smaller subtasks.";
+            return ContextMessages.text("reflection.complex", truncate(taskDescription, 25));
         }
         // Insufficient resources
         if (lowerReason.contains("lack") || lowerReason.contains("insufficient") ||
             lowerReason.contains("not enough") || lowerReason.contains("missing")) {
-            return "Insufficient resources. Gather the required materials first, or use find_block to locate resources.";
+            return ContextMessages.text("reflection.resources");
         }
         // Path/navigation issues
         if (lowerReason.contains("stuck") || lowerReason.contains("cannot reach") ||
             lowerReason.contains("blocked") || lowerReason.contains("unreachable")) {
-            return "Navigation is blocked. Use look_around to find an alternative route, or clear the obstacles.";
+            return ContextMessages.text("reflection.navigation");
         }
         // Environmental/external factors
         if (lowerReason.contains("danger") || lowerReason.contains("hostile") ||
             lowerReason.contains("threat")) {
-            return "The environment is dangerous. Secure the area by eliminating threats or finding a safe location before continuing the task.";
+            return ContextMessages.text("reflection.danger");
         }
 
         // General advice
-        return "Task '" + truncate(taskDescription, 25) + "' failed: " +
-                truncate(reason, 40) + ". Consider changing strategy or breaking down the task.";
+        return ContextMessages.text("reflection.taskFailed", truncate(taskDescription, 25), truncate(reason, 40));
     }
 
     private static String truncate(String s, int maxLen) {

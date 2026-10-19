@@ -1,5 +1,7 @@
 package com.mineagent.engine.world;
 
+import com.mineagent.engine.i18n.ContextMessages;
+
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -429,11 +431,11 @@ public final class WorldAssetIndex {
         for (Asset asset : assets.values()) {
             if (asset.carried()) carried.merge(asset.resourceId(), asset.count(), Integer::sum);
         }
-        StringBuilder out = new StringBuilder("World assets (observed evidence):\n");
+        StringBuilder out = new StringBuilder(ContextMessages.text("assets.heading"));
         if (carried.isEmpty()) {
-            out.append("- carried: empty or not yet observed\n");
+            out.append(ContextMessages.text("assets.empty"));
         } else {
-            out.append("- carried: ");
+            out.append(ContextMessages.text("assets.carried"));
             carried.entrySet().stream()
                     .sorted(Map.Entry.comparingByKey())
                     .limit(14)
@@ -452,16 +454,16 @@ public final class WorldAssetIndex {
                         .thenComparing(Asset::key))
                 .limit(10).toList();
         for (Asset asset : useful) {
-            out.append("- ").append(asset.stored() ? "stored " : "world ")
+            out.append("- ").append(asset.stored() ? ContextMessages.text("assets.stored") : ContextMessages.text("assets.world"))
                     .append(asset.resourceId());
             if (asset.count() > 1) out.append('x').append(asset.count());
             if (asset.position() != null) out.append(" @ ").append(asset.position().compact());
             if (!asset.capabilities().isEmpty()) {
-                out.append(" can=").append(String.join(",", asset.capabilities()));
+                out.append(ContextMessages.text("assets.can")).append(String.join(",", asset.capabilities()));
             }
-            out.append(" age_ticks=").append(age(asset, gameTick)).append('\n');
+            out.append(ContextMessages.text("field.ageTicks")).append(age(asset, gameTick)).append('\n');
         }
-        out.append("Use resolve_need before producing a replacement when ownership or location is uncertain.\n");
+        out.append(ContextMessages.text("assets.advice"));
         return out.toString();
     }
 

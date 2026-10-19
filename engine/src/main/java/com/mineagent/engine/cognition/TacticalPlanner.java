@@ -1,5 +1,7 @@
 package com.mineagent.engine.cognition;
 
+import com.mineagent.engine.i18n.ContextMessages;
+
 import com.mineagent.engine.planning.ContextualDecisionEngine;
 
 import java.util.ArrayList;
@@ -48,7 +50,7 @@ public final class TacticalPlanner {
                         "survival", 1.0, "owner_safety", -0.15,
                         "goal_progress", -0.65, "information_gain", -0.15),
                 violations(!immediateEmergency, "no immediate survival emergency"),
-                0.05, "Local reflex must first restore a viable body state"));
+                0.05, ContextMessages.text("tactical.survive")));
         candidates.add(candidate("retreat_and_reassess", effects(
                         "survival", 0.85, "threat_control", 0.35,
                         "information_gain", 0.55, "goal_progress", -0.25),
@@ -60,12 +62,12 @@ public final class TacticalPlanner {
                                 && frame.immediateThreats().size() == 1
                                 && frame.environment().immediateHazards() == 0,
                         "healthy armed actor has a grounded single-threat response"),
-                0.2, "Create distance, regain options, then re-evaluate"));
+                0.2, ContextMessages.text("tactical.retreat")));
         candidates.add(candidate("defend_owner", effects(
                         "owner_safety", 1.0, "team_cohesion", 0.7,
                         "threat_control", 0.65, "survival", -0.15),
                 violations(ownerRisk < 0.15, "owner is not under observed pressure"),
-                0.18, "Interrupt threats currently endangering the owner"));
+                0.18, ContextMessages.text("tactical.defend")));
         candidates.add(candidate("engage_priority_threat", effects(
                         "threat_control", 1.0, "owner_safety", 0.55,
                         "team_cohesion", 0.35, "survival", 0.15),
@@ -75,35 +77,35 @@ public final class TacticalPlanner {
                         !frame.vitals().armed(), "no carried combat-capable item",
                         frame.vitals().healthRatio() < 0.35, "health too low to commit"),
                 clamp(0.15 + threatPressure * 0.25),
-                "Control the most urgent grounded threat"));
+                ContextMessages.text("tactical.engage")));
         candidates.add(candidate("replan_blocked_goal", effects(
                         "goal_progress", 0.8, "information_gain", 0.85,
                         "survival", 0.2),
                 violations(!blocked, "executor has not reported a blocker"),
-                0.12, "The old action model is contradicted by executor evidence"));
+                0.12, ContextMessages.text("tactical.replan")));
         candidates.add(candidate("regroup", effects(
                         "team_cohesion", 1.0, "owner_safety", 0.35,
                         "survival", 0.25, "goal_progress", -0.15),
                 violations(cohesionNeed < 0.2, "team is already within useful range"),
-                0.1, "Restore mutual support and shared perception"));
+                0.1, ContextMessages.text("tactical.regroup")));
         candidates.add(candidate("continue_verified_plan", effects(
                         "goal_progress", 1.0, "team_cohesion", 0.15,
                         "survival", 0.05),
                 violations(!activeTask, "no active verified body task",
                         blocked, "executor reports the current task is blocked",
                         immediateEmergency, "survival hard constraint is active"),
-                0.05, "Let the deterministic executor finish without LLM polling"));
+                0.05, ContextMessages.text("tactical.continue")));
         candidates.add(candidate("observe_before_commit", effects(
                         "information_gain", 1.0, "survival", 0.25,
                         "goal_progress", 0.05),
                 violations(immediateEmergency, "observation cannot delay survival"),
-                0.03, "Acquire evidence before choosing an irreversible action"));
+                0.03, ContextMessages.text("tactical.observe")));
 
         ContextualDecisionEngine.Decision ranked = decisions.decide(context, candidates);
         var selected = ranked.feasible().isEmpty() ? null : ranked.feasible().get(0);
         if (selected == null) {
             return new TacticalDecision(TacticalDecision.Posture.OBSERVE_BEFORE_COMMIT,
-                    0.1, "all proposed actions violated a hard constraint", List.of(),
+                    0.1, ContextMessages.text("tactical.constrained"), List.of(),
                     false, true, frame.gameTick());
         }
 

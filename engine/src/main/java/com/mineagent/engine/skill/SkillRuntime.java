@@ -1,5 +1,7 @@
 package com.mineagent.engine.skill;
 
+import com.mineagent.engine.i18n.ContextMessages;
+
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -62,7 +64,7 @@ public final class SkillRuntime {
     public record DispatchResult(boolean accepted, boolean asynchronous,
                                  boolean success, String evidence) {
         public DispatchResult {
-            evidence = normalize(evidence, success ? "accepted" : "dispatch failed");
+            evidence = normalize(evidence, success ? "accepted" : ContextMessages.text("skill.dispatchFailure"));
         }
     }
 
@@ -136,21 +138,21 @@ public final class SkillRuntime {
                                           long gameTick) {
         if (active()) {
             return new StartResult(false, runId,
-                    "Skill runtime is already executing " + skillName);
+                    ContextMessages.text("skill.busy") + skillName);
         }
         SkillLibrary.Skill learned = library.get(requestedSkill).orElse(null);
         if (learned == null) {
-            return new StartResult(false, null, "Unknown learned skill: " + requestedSkill);
+            return new StartResult(false, null, ContextMessages.text("skill.notFound") + requestedSkill);
         }
         List<Step> decoded;
         try {
             decoded = decode(learned.actionSequence(), overrides);
         } catch (IllegalArgumentException malformed) {
             return new StartResult(false, null,
-                    "Skill cannot be executed: " + malformed.getMessage());
+                    ContextMessages.text("skill.cannotExecute") + malformed.getMessage());
         }
         if (decoded.isEmpty()) {
-            return new StartResult(false, null, "Skill has no executable actions");
+            return new StartResult(false, null, ContextMessages.text("skill.noActions"));
         }
         runId = "skill-" + UUID.randomUUID().toString().substring(0, 12);
         skillName = learned.name();
@@ -168,7 +170,7 @@ public final class SkillRuntime {
         taskPausedAtTick = 0L;
         worldRevisionAtDispatch = worldModel.revision();
         return new StartResult(true, runId,
-                "Accepted " + steps.size() + " verified step(s)");
+                ContextMessages.text("skill.acceptedSteps", steps.size()));
     }
 
     /** Advance at most one transition per server tick. */
@@ -179,13 +181,13 @@ public final class SkillRuntime {
 
         if (status == Status.WAITING_TASK && !taskPaused
                 && gameTick - stepStartedTick > step.timeoutTicks()) {
-            failStep("step timed out after " + step.timeoutTicks() + " ticks", gameTick);
+            failStep(ContextMessages.text("skill.timeout", step.timeoutTicks()), gameTick);
             return;
         }
         if (status == Status.VERIFYING) {
             if (effectsVerified(step, gameTick)) completeStep(gameTick);
             else if (gameTick > verificationDeadlineTick) {
-                failStep("declared postcondition was not observed", gameTick);
+                failStep(ContextMessages.text("skill.postcondition"), gameTick);
             }
             return;
         }
@@ -194,7 +196,7 @@ public final class SkillRuntime {
         List<Condition> missing = missing(step.preconditions(), 0L, gameTick);
         if (!missing.isEmpty()) {
             terminal(Status.NEEDS_REPLAN,
-                    "precondition not grounded: " + describe(missing.get(0)), gameTick);
+                    ContextMessages.text("skill.precondition") + describe(missing.get(0)), gameTick);
             return;
         }
 
@@ -283,9 +285,9 @@ public final class SkillRuntime {
     }
 
     public synchronized String summarizeForPrompt() {
-        if (status == Status.IDLE) return "Skill runtime: idle\n";
+        if (status == Status.IDLE) return ContextMessages.text("skill.idle");
         Snapshot value = snapshot();
-        return "Skill runtime: run=" + value.runId() + " skill=" + value.skillName()
+        return ContextMessages.text("skill.heading") + value.runId() + " skill=" + value.skillName()
                 + " status=" + value.status().name().toLowerCase(Locale.ROOT)
                 + " step=" + Math.min(value.stepIndex() + 1, value.stepCount())
                 + "/" + value.stepCount() + " tool=" + value.activeTool()
@@ -293,14 +295,14 @@ public final class SkillRuntime {
     }
 
     private void completeStep(long gameTick) {
-        lastEvidence = "step verified: " + steps.get(stepIndex).tool();
+        lastEvidence = ContextMessages.text("skill.stepVerified") + steps.get(stepIndex).tool();
         stepIndex++;
         attempt = 0;
         activeActionId = null;
         updatedTick = Math.max(updatedTick, gameTick);
         if (stepIndex >= steps.size()) {
             library.recordResult(skillName, true);
-            terminal(Status.SUCCEEDED, "all skill effects verified", gameTick);
+            terminal(Status.SUCCEEDED, ContextMessages.text("skill.verified"), gameTick);
         } else {
             status = Status.RUNNING;
         }
@@ -308,7 +310,7 @@ public final class SkillRuntime {
 
     private void failStep(String evidence, long gameTick) {
         Step step = steps.get(stepIndex);
-        lastEvidence = normalize(evidence, "step failed");
+        lastEvidence = normalize(evidence, ContextMessages.text("skill.stepFailed"));
         String actionToCancel = activeActionId;
         boolean cancelAsync = status == Status.WAITING_TASK;
         activeActionId = null;
@@ -323,8 +325,8 @@ public final class SkillRuntime {
         Status terminal = step.failurePolicy() == FailurePolicy.ABORT
                 ? Status.FAILED : Status.NEEDS_REPLAN;
         if (cancelAsync) cancelDispatchedAction(actionToCancel);
-        terminal(terminal, "step " + (stepIndex + 1) + " " + step.tool()
-                + " failed: " + lastEvidence, gameTick);
+        terminal(terminal, ContextMessages.text("skill.step") + (stepIndex + 1) + " " + step.tool()
+                + ContextMessages.text("skill.failed") + lastEvidence, gameTick);
     }
 
     private void terminal(Status terminalStatus, String evidence, long gameTick) {
@@ -346,7 +348,7 @@ public final class SkillRuntime {
             // Cancellation is a safety cleanup. Never let a platform-specific
             // cancellation failure take down the server tick or hide the
             // already-recorded skill failure.
-            lastEvidence = normalize(lastEvidence + "; cancellation failed: "
+            lastEvidence = normalize(lastEvidence + ContextMessages.text("skill.cancelFailure")
                     + failure.getMessage(), lastEvidence);
         }
     }
@@ -376,27 +378,27 @@ public final class SkillRuntime {
         try {
             parsed = JsonParser.parseString(sequenceJson);
         } catch (RuntimeException malformed) {
-            throw new IllegalArgumentException("action_sequence is invalid JSON", malformed);
+            throw new IllegalArgumentException(ContextMessages.text("skill.invalidJson"), malformed);
         }
         if (!parsed.isJsonArray()) {
-            throw new IllegalArgumentException("action_sequence must be an array");
+            throw new IllegalArgumentException(ContextMessages.text("skill.array"));
         }
         JsonArray array = parsed.getAsJsonArray();
         if (array.isEmpty() || array.size() > MAX_STEPS) {
-            throw new IllegalArgumentException("action_sequence must contain 1-"
-                    + MAX_STEPS + " steps");
+            throw new IllegalArgumentException(ContextMessages.text("skill.sequenceSize")
+                    + MAX_STEPS + ContextMessages.text("skill.steps"));
         }
         ArrayList<Step> result = new ArrayList<>();
         for (int index = 0; index < array.size(); index++) {
             if (!array.get(index).isJsonObject()) {
-                throw new IllegalArgumentException("step " + index + " is not an object");
+                throw new IllegalArgumentException(ContextMessages.text("skill.step") + index + ContextMessages.text("skill.notObject"));
             }
             JsonObject source = array.get(index).getAsJsonObject();
             String tool = string(source, "tool", null);
             tool = normalizeTool(tool);
             if (NEVER_NEST.contains(tool)) {
-                throw new IllegalArgumentException("step " + index
-                        + " cannot invoke control tool " + tool);
+                throw new IllegalArgumentException(ContextMessages.text("skill.step") + index
+                        + ContextMessages.text("skill.control") + tool);
             }
             JsonObject arguments = object(source, "args");
             if (arguments == null) arguments = new JsonObject();
@@ -426,19 +428,19 @@ public final class SkillRuntime {
     private static List<Condition> conditions(JsonObject source, String key) {
         if (!source.has(key) || source.get(key).isJsonNull()) return List.of();
         if (!source.get(key).isJsonArray()) {
-            throw new IllegalArgumentException(key + " must be an array");
+            throw new IllegalArgumentException(key + ContextMessages.text("skill.fieldArray"));
         }
         ArrayList<Condition> result = new ArrayList<>();
         for (JsonElement element : source.getAsJsonArray(key)) {
             if (!element.isJsonObject()) {
-                throw new IllegalArgumentException(key + " contains a non-object");
+                throw new IllegalArgumentException(key + ContextMessages.text("skill.fieldNotObject"));
             }
             JsonObject value = element.getAsJsonObject();
             String subject = string(value, "subject", null);
             String predicate = string(value, "predicate", null);
             if (subject == null || predicate == null) {
                 throw new IllegalArgumentException(key
-                        + " conditions require subject and predicate");
+                        + ContextMessages.text("skill.requiredCondition"));
             }
             result.add(new Condition(subject, predicate,
                     string(value, "value", "*"), number(value,
@@ -456,7 +458,7 @@ public final class SkillRuntime {
     private static JsonObject object(JsonObject source, String key) {
         if (source == null || !source.has(key) || source.get(key).isJsonNull()) return null;
         if (!source.get(key).isJsonObject()) {
-            throw new IllegalArgumentException(key + " must be an object");
+            throw new IllegalArgumentException(key + ContextMessages.text("skill.fieldObject"));
         }
         return source.getAsJsonObject(key).deepCopy();
     }
@@ -504,7 +506,7 @@ public final class SkillRuntime {
     private static String normalizeTool(String value) {
         String tool = normalize(value, "").toLowerCase(Locale.ROOT);
         if (!tool.matches("[a-z][a-z0-9_]{0,63}")) {
-            throw new IllegalArgumentException("invalid tool name: " + value);
+            throw new IllegalArgumentException(ContextMessages.text("skill.invalidTool") + value);
         }
         return tool;
     }

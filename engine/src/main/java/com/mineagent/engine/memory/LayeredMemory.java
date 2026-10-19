@@ -1,5 +1,7 @@
 package com.mineagent.engine.memory;
 
+import com.mineagent.engine.i18n.ContextMessages;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumMap;
@@ -159,16 +161,16 @@ public final class LayeredMemory {
 
     public synchronized String summarizeForPrompt(String query, long tick, int tokenBudget) {
         List<Entry> values = recall(query, tick, tokenBudget);
-        if (values.isEmpty()) return "Layered memory: none\n";
-        StringBuilder out = new StringBuilder("Layered memory (goal-conditioned evidence):\n");
+        if (values.isEmpty()) return ContextMessages.text("layered.empty");
+        StringBuilder out = new StringBuilder(ContextMessages.text("layered.heading"));
         for (Entry value : values) {
             out.append("- [").append(value.tier().name().toLowerCase(Locale.ROOT)).append("] ")
                     .append(value.key()).append('=').append(value.value())
-                    .append(" confidence=").append(String.format(Locale.ROOT, "%.2f", value.confidence()))
-                    .append(" reliability=").append(String.format(Locale.ROOT, "%.2f", value.reliability()))
+                    .append(ContextMessages.text("field.confidence")).append(String.format(Locale.ROOT, "%.2f", value.confidence()))
+                    .append(ContextMessages.text("field.reliability")).append(String.format(Locale.ROOT, "%.2f", value.reliability()))
                     .append('\n');
         }
-        out.append("Use memory as evidence, verify volatile facts before irreversible actions.\n");
+        out.append(ContextMessages.text("layered.advice"));
         return out.toString();
     }
 

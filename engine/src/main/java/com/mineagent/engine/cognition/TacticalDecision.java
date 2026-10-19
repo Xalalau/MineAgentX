@@ -1,5 +1,7 @@
 package com.mineagent.engine.cognition;
 
+import com.mineagent.engine.i18n.ContextMessages;
+
 import java.util.List;
 import java.util.Locale;
 
@@ -24,7 +26,7 @@ public record TacticalDecision(Posture posture, double confidence,
         confidence = Double.isFinite(confidence)
                 ? Math.max(0.0, Math.min(1.0, confidence)) : 0.0;
         reason = reason == null || reason.isBlank()
-                ? "insufficient evidence" : reason.trim();
+                ? ContextMessages.text("tactical.insufficient") : reason.trim();
         alternatives = alternatives == null ? List.of() : List.copyOf(alternatives);
         gameTick = Math.max(0L, gameTick);
     }
@@ -37,6 +39,6 @@ public record TacticalDecision(Posture posture, double confidence,
 
     public static TacticalDecision initial() {
         return new TacticalDecision(Posture.OBSERVE_BEFORE_COMMIT, 0.0,
-                "no server observation yet", List.of(), false, false, 0L);
+                ContextMessages.text("tactical.initial"), List.of(), false, false, 0L);
     }
 }

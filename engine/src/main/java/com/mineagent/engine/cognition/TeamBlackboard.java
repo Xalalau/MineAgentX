@@ -1,5 +1,7 @@
 package com.mineagent.engine.cognition;
 
+import com.mineagent.engine.i18n.ContextMessages;
+
 import com.mineagent.api.task.TaskState;
 
 import java.util.ArrayList;
@@ -100,7 +102,7 @@ public final class TeamBlackboard {
                                         String objective, String role, String target,
                                         long gameTick) {
         if (ownerId == null || companionId == null) {
-            return new ClaimResult(false, "Missing owner or companion identity");
+            return new ClaimResult(false, ContextMessages.text("team.missing"));
         }
         GroupState group = GROUPS.computeIfAbsent(ownerId, ignored -> new GroupState());
         synchronized (group) {
@@ -111,7 +113,7 @@ public final class TeamBlackboard {
                         && canonical(existing.objective()).equals(requested)
                         && (existing.state() == TaskState.RUNNING
                         || existing.state() == TaskState.PAUSED)) {
-                    return new ClaimResult(false, "Objective is already claimed by "
+                    return new ClaimResult(false, ContextMessages.text("team.already")
                             + shortId(existing.companionId()));
                 }
             }
@@ -119,7 +121,7 @@ public final class TeamBlackboard {
                     "manual:" + companionId, normalize(objective, "team objective"),
                     normalize(role, "flex"), blankToNull(target), "team_plan",
                     TaskState.RUNNING, Math.max(0L, gameTick)));
-            return new ClaimResult(true, "Objective claimed");
+            return new ClaimResult(true, ContextMessages.text("team.claimed"));
         }
     }
 
@@ -147,23 +149,23 @@ public final class TeamBlackboard {
 
     public static String summarize(UUID ownerId, UUID selfId, long gameTick) {
         GroupState group = GROUPS.get(ownerId);
-        if (group == null) return "Team blackboard: no live teammate reports\n";
+        if (group == null) return ContextMessages.text("team.empty");
         synchronized (group) {
             expire(group, gameTick);
-            StringBuilder out = new StringBuilder("Team blackboard (live evidence):\n");
+            StringBuilder out = new StringBuilder(ContextMessages.text("team.heading"));
             group.reports.values().stream()
                     .sorted(Comparator.comparing(MemberReport::name))
                     .forEach(report -> out.append("- ")
-                            .append(report.companionId().equals(selfId) ? "self " : "ally ")
+                            .append(report.companionId().equals(selfId) ? ContextMessages.text("team.self") : ContextMessages.text("team.ally"))
                             .append(report.name()).append(" @ ")
                             .append(report.position().compact()).append(" hp=")
-                            .append(Math.round(report.healthRatio() * 100.0)).append("% posture=")
+                            .append(Math.round(report.healthRatio() * 100.0)).append(ContextMessages.text("team.posture"))
                             .append(report.posture().name().toLowerCase(Locale.ROOT))
-                            .append(" threats=").append(report.immediateThreats())
-                            .append(" task=").append(report.taskName()).append('\n'));
+                            .append(ContextMessages.text("team.threats")).append(report.immediateThreats())
+                            .append(ContextMessages.text("team.task")).append(report.taskName()).append('\n'));
             for (Commitment commitment : group.commitments.values()) {
-                out.append("- commitment ").append(shortId(commitment.companionId()))
-                        .append(" role=").append(commitment.role())
+                out.append(ContextMessages.text("team.commitment")).append(shortId(commitment.companionId()))
+                        .append(ContextMessages.text("team.role")).append(commitment.role())
                         .append(" objective=").append(commitment.objective());
                 if (commitment.target() != null) out.append(" target=").append(commitment.target());
                 out.append(" source=").append(commitment.source()).append('\n');
@@ -177,7 +179,7 @@ public final class TeamBlackboard {
             }
             duplicateWarnings(group.commitments.values()).forEach(warning ->
                     out.append("- coordination_warning: ").append(warning).append('\n'));
-            out.append("Coordinate through commitments and support requests; do not duplicate an ally's objective without a reason.\n");
+            out.append(ContextMessages.text("team.advice"));
             return out.toString();
         }
     }
@@ -208,7 +210,7 @@ public final class TeamBlackboard {
         ArrayList<String> warnings = new ArrayList<>();
         for (Map.Entry<String, List<Commitment>> entry : grouped.entrySet()) {
             if (entry.getValue().size() < 2) continue;
-            warnings.add(entry.getValue().size() + " companions claim objective '"
+            warnings.add(entry.getValue().size() + ContextMessages.text("team.duplicate")
                     + entry.getValue().get(0).objective() + "'");
         }
         return List.copyOf(warnings);

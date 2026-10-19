@@ -1,5 +1,7 @@
 package com.mineagent.engine.memory;
 
+import com.mineagent.engine.i18n.ContextMessages;
+
 import com.mineagent.api.task.TaskSnapshot;
 import com.mineagent.api.task.TaskState;
 
@@ -81,7 +83,7 @@ public final class ExperienceStore {
                 .map(ScoredExperience::experience)
                 .toList();
         if (relevant.isEmpty()) return "";
-        StringBuilder out = new StringBuilder("Relevant verified experiences:\n");
+        StringBuilder out = new StringBuilder(ContextMessages.text("experience.heading"));
         for (Experience experience : relevant) {
             out.append("- ").append(experience.action()).append(" -> ")
                     .append(experience.outcome());

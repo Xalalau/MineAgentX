@@ -1,5 +1,7 @@
 package com.mineagent.engine.memory;
 
+import com.mineagent.engine.i18n.ContextMessages;
+
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -290,11 +292,11 @@ public class PlaceEventMemory {
     /** Return only locations semantically related to the active objective. */
     public String summarizeForPrompt(String query, int limit) {
         if (limit <= 0) return "";
-        if (events.isEmpty()) return "(No location memories yet)";
+        if (events.isEmpty()) return ContextMessages.text("place.empty");
         String needle = query == null ? "" : query.trim();
 
         StringBuilder sb = new StringBuilder();
-        sb.append("## Location memories (recently seen resources/events)\n");
+        sb.append(ContextMessages.text("place.heading"));
 
         // Group by subject and keep only the latest verified record for each
         Map<String, PlaceEvent> latest = new LinkedHashMap<>();
@@ -320,7 +322,7 @@ public class PlaceEventMemory {
             if (shown >= Math.min(10, limit)) break;
             PlaceEvent e = value.event();
             sb.append("- ").append(e.subject())
-              .append(" at (").append(e.x()).append(",").append(e.y()).append(",").append(e.z()).append(")")
+              .append(ContextMessages.text("place.at")).append(e.x()).append(",").append(e.y()).append(",").append(e.z()).append(")")
               .append(" [").append(e.dimension()).append("]");
             if (e.note() != null && !e.note().isBlank()) {
                 sb.append(" — ").append(e.note());
@@ -330,7 +332,7 @@ public class PlaceEventMemory {
         }
 
         // Number of explored chunks
-        sb.append("(Explored ").append(exploredChunks.size()).append(" chunks)\n");
+        sb.append(ContextMessages.text("place.explored", exploredChunks.size()));
 
         return sb.toString();
     }

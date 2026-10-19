@@ -1,5 +1,7 @@
 package com.mineagent.engine.planning;
 
+import com.mineagent.engine.i18n.ContextMessages;
+
 import com.mineagent.api.task.TaskSnapshot;
 import com.mineagent.api.task.TaskState;
 import com.mineagent.engine.world.SemanticWorldModel;
@@ -30,7 +32,7 @@ public final class HierarchicalRollingPlanner {
         public ReplanSignal {
             reason = reason == null ? Reason.PLAN_MISSING : reason;
             detail = normalize(detail, reason.name());
-            goal = normalize(goal, "Current owner goal");
+            goal = normalize(goal, ContextMessages.text("rolling.currentGoal"));
             activeStep = blankToNull(activeStep);
             gameTick = Math.max(0L, gameTick);
             planRevision = Math.max(0L, planRevision);
@@ -42,7 +44,7 @@ public final class HierarchicalRollingPlanner {
                     + " goal=" + goal + " active_step="
                     + (activeStep == null ? "none" : activeStep)
                     + " detail=" + detail
-                    + "; preserve verified steps and repair only the next executable window";
+                    + ContextMessages.text("rolling.eventAdvice");
         }
     }
 
@@ -167,24 +169,24 @@ public final class HierarchicalRollingPlanner {
         }
         if (!strategicGoal.isBlank() && state.nodes().isEmpty()) {
             reason = Reason.PLAN_MISSING;
-            detail = "The strategic goal has no verifier-backed decomposition";
+            detail = ContextMessages.text("rolling.noDecomposition");
         } else if (blocked != null && current == null) {
             reason = Reason.ACTIVE_STEP_BLOCKED;
             current = blocked;
-            detail = normalize(blocked.lastFailure(), "The active step is blocked");
+            detail = normalize(blocked.lastFailure(), ContextMessages.text("rolling.blocked"));
         } else if (taskActive && lastProgressTick > 0L
                 && gameTick - lastProgressTick >= STALL_TICKS) {
             reason = Reason.EXECUTOR_STALLED;
-            detail = "No executor progress for " + (gameTick - lastProgressTick)
-                    + " ticks while running " + activeTaskName;
+            detail = ContextMessages.text("rolling.noProgress") + (gameTick - lastProgressTick)
+                    + ContextMessages.text("rolling.running") + activeTaskName;
         } else if (consecutiveFailures >= FAILURE_REPLAN_THRESHOLD) {
             reason = Reason.REPEATED_FAILURE;
-            detail = consecutiveFailures + " consecutive executor failures";
+            detail = consecutiveFailures + ContextMessages.text("rolling.consecutive");
         } else if (graph.hasActivePlan() && current == null) {
             reason = Reason.WINDOW_EXHAUSTED;
             detail = state.goalStatus() == PlanGraph.GoalStatus.VERIFYING
-                    ? "All tactical milestones are verified, but top-level acceptance evidence is still missing"
-                    : "No dependency-ready step remains in the tactical window";
+                    ? ContextMessages.text("rolling.noAcceptance")
+                    : ContextMessages.text("rolling.noReadyStep");
         } else if (current != null && current.status() != PlanGraph.NodeStatus.IN_PROGRESS
                 && worldRevision - observedWorldRevision >= 32L
                 && state.revision() == observedPlanRevision
@@ -192,7 +194,7 @@ public final class HierarchicalRollingPlanner {
             // A large semantic delta matters only between body actions. During
             // an action, ordinary movement and inventory updates are expected.
             reason = Reason.WORLD_CHANGED;
-            detail = "World evidence changed materially since the current plan revision";
+            detail = ContextMessages.text("rolling.worldChanged");
         }
 
         observedPlanRevision = Math.max(observedPlanRevision, state.revision());
@@ -217,17 +219,17 @@ public final class HierarchicalRollingPlanner {
     public synchronized String summarizeForPrompt() {
         PlanGraph.State state = graph.exportState();
         if (state.nodes().isEmpty() && strategicGoal.isBlank()) {
-            return "Hierarchical planner: idle\n";
+            return ContextMessages.text("rolling.empty");
         }
-        StringBuilder out = new StringBuilder("Hierarchical rolling planner:\n");
-        out.append("- strategic_goal=").append(normalize(strategicGoal, state.goal()))
-                .append(" epoch=").append(goalEpoch)
+        StringBuilder out = new StringBuilder(ContextMessages.text("rolling.heading"));
+        out.append(ContextMessages.text("rolling.goal")).append(normalize(strategicGoal, state.goal()))
+                .append(ContextMessages.text("rolling.epoch")).append(goalEpoch)
                 .append(" status=").append(state.goalStatus().name()
                         .toLowerCase(Locale.ROOT))
-                .append(" repairs=").append(state.repairCount()).append('\n');
+                .append(ContextMessages.text("rolling.repairs")).append(state.repairCount()).append('\n');
         List<PlanGraph.PlanNode> tactical = tacticalWindow(state.nodes());
-        out.append("- tactical_window=");
-        if (tactical.isEmpty()) out.append("empty");
+        out.append(ContextMessages.text("rolling.window"));
+        if (tactical.isEmpty()) out.append(ContextMessages.text("rolling.windowEmpty"));
         for (PlanGraph.PlanNode node : tactical) {
             out.append('\n').append("  * ").append(node.id()).append('(')
                     .append(node.status().name().toLowerCase(Locale.ROOT)).append("): ")
@@ -236,22 +238,22 @@ public final class HierarchicalRollingPlanner {
                 out.append(" depends_on=").append(String.join(",", node.dependsOn()));
             }
             if (node.lastFailure() != null) {
-                out.append(" blocker=").append(compact(node.lastFailure(), 140));
+                out.append(ContextMessages.text("rolling.blocker")).append(compact(node.lastFailure(), 140));
             }
         }
         out.append('\n');
-        out.append("- execution=").append(taskActive
-                ? activeTaskName + " task_id=" + activeTaskId : "idle")
-                .append(" consecutive_failures=").append(consecutiveFailures).append('\n');
+        out.append(ContextMessages.text("rolling.execution")).append(taskActive
+                ? activeTaskName + " task_id=" + activeTaskId : ContextMessages.text("rolling.idle"))
+                .append(ContextMessages.text("rolling.failures")).append(consecutiveFailures).append('\n');
         if (!state.goalConditions().isEmpty()) {
-            out.append("- strategic_acceptance=");
+            out.append(ContextMessages.text("rolling.acceptance"));
             for (int index = 0; index < state.goalConditions().size(); index++) {
                 if (index > 0) out.append("; ");
                 out.append(state.goalConditions().get(index).describe());
             }
             out.append('\n');
         }
-        out.append("Plan only the next useful window; preserve verified prefix, explicit dependencies, constraints, contingencies, and observable success criteria.\n");
+        out.append(ContextMessages.text("rolling.advice"));
         return out.toString();
     }
 

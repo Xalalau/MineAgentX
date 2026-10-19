@@ -1,5 +1,7 @@
 package com.mineagent.engine.exploration;
 
+import com.mineagent.engine.i18n.ContextMessages;
+
 import com.google.gson.JsonParser;
 import com.mineagent.api.task.TaskState;
 import com.mineagent.engine.skill.SkillLibrary;
@@ -60,7 +62,7 @@ public final class MechanismExplorer {
         public Experiment {
             id = normalize(id, "experiment");
             subject = normalize(subject, "unknown_mechanism");
-            hypothesis = normalize(hypothesis, "Unknown behavior");
+            hypothesis = normalize(hypothesis, ContextMessages.text("explore.unknownBehavior"));
             probeTool = normalize(probeTool, "look_around").toLowerCase(Locale.ROOT);
             probeArguments = normalize(probeArguments, "{}");
             expectedSubject = normalize(expectedSubject, "tool:" + probeTool);
@@ -69,7 +71,7 @@ public final class MechanismExplorer {
             risk = risk == null ? Risk.LOW : risk;
             status = status == null ? Status.ARMED : status;
             actionId = blankToNull(actionId);
-            evidence = normalize(evidence, "Awaiting probe");
+            evidence = normalize(evidence, ContextMessages.text("explore.awaitingProbe"));
             createdTick = Math.max(0L, createdTick);
             actionTick = Math.max(0L, actionTick);
             deadlineTick = Math.max(actionTick, deadlineTick);
@@ -136,7 +138,7 @@ public final class MechanismExplorer {
     public record CompensationResult(boolean accepted, boolean asynchronous,
                                      boolean success, String evidence) {
         public CompensationResult {
-            evidence = normalize(evidence, success ? "compensated" : "compensation failed");
+            evidence = normalize(evidence, success ? "compensated" : ContextMessages.text("explore.compensationFailed"));
         }
     }
 
@@ -219,40 +221,40 @@ public final class MechanismExplorer {
                 || !isJsonObject(probeArguments)
                 || !isJsonObject(compensationArguments == null ? "{}" : compensationArguments)) {
             return new Proposal(false, null,
-                    "Experiment text, context, or JSON arguments are invalid or too large");
+                    ContextMessages.text("explore.invalid"));
         }
         if (!tool.matches("[a-z][a-z0-9_]{0,63}") || !SAFE_PROBE_TOOLS.contains(tool)) {
             return new Proposal(false, null,
-                    "Probe tool is not permitted for controlled exploration: " + probeTool);
+                    ContextMessages.text("explore.denied") + probeTool);
         }
         Risk normalizedRisk = risk == null ? Risk.LOW : risk;
         if (normalizedRisk == Risk.HIGH) {
             return new Proposal(false, null,
-                    "High-risk experiments require an explicit owner-directed normal action");
+                    ContextMessages.text("explore.highRisk"));
         }
         if (MEDIUM_RISK_TOOLS.contains(tool) && normalizedRisk == Risk.LOW) {
             return new Proposal(false, null,
-                    "Probe " + tool + " must declare risk=medium because it may change state");
+                    ContextMessages.text("explore.probe") + tool + ContextMessages.text("explore.declareRisk"));
         }
         if (normalizedRisk == Risk.MEDIUM && (!reversible || compensation == null
                 || !SAFE_COMPENSATION_TOOLS.contains(compensation))) {
             return new Proposal(false, null,
-                    "A state-changing probe requires an explicit verified compensation tool");
+                    ContextMessages.text("explore.compensation"));
         }
         if ("craft".equals(tool)) {
             return new Proposal(false, null,
-                    "Crafting consumes inputs and has no generic lossless compensation; inspect recipes instead");
+                    ContextMessages.text("explore.crafting"));
         }
         if (activeExperiment() != null) {
             return new Proposal(false, activeExperiment(),
-                    "Finish or abort the active experiment before arming another");
+                    ContextMessages.text("explore.active"));
         }
         int cost = Math.max(1, Math.min(MAX_BUDGET, estimatedCost));
         Budget budget = budgetFor(subject, gameTick);
         if (budget.probes() >= MAX_PROBES_PER_SUBJECT || budget.remaining() < cost) {
             return new Proposal(false, null,
-                    "Exploration budget exhausted for " + subject
-                            + "; use known evidence or request explicit owner direction");
+                    ContextMessages.text("explore.budget") + subject
+                            + ContextMessages.text("explore.ownerDirection"));
         }
         String id = "exp-" + UUID.randomUUID().toString().substring(0, 12);
         String expectedSubjectValue = normalize(expectedSubject, "tool:" + tool);
@@ -261,7 +263,7 @@ public final class MechanismExplorer {
         Experiment experiment = new Experiment(id, subject, hypothesis, tool,
                 probeArguments, expectedSubjectValue, expectedPredicateValue,
                 expectedValueValue, normalizedRisk, Status.ARMED, null,
-                "Call the declared probe tool once", gameTick, 0L,
+                ContextMessages.text("explore.call"), gameTick, 0L,
                 saturatedAdd(gameTick, 600L), worldModel.revision(), 0,
                 contextKey, compensation, compensationArguments, reversible,
                 cost, estimatedInformationGain, snapshot(expectedSubjectValue,
@@ -274,7 +276,7 @@ public final class MechanismExplorer {
         revision++;
         trim();
         return new Proposal(true, experiment,
-                "Experiment armed; call " + tool + " once with the exact proposed arguments");
+                ContextMessages.text("explore.armed") + tool + ContextMessages.text("explore.once"));
     }
 
     /** Rank caller-supplied black-box probes by information per cost and safety. */
@@ -286,9 +288,9 @@ public final class MechanismExplorer {
                 .max(Comparator.comparingDouble(MechanismExplorer::probeScore))
                 .orElse(null);
         if (best == null) return new Recommendation(null, 0.0,
-                "No candidate fits the remaining reversible exploration budget");
+                ContextMessages.text("explore.noCandidate"));
         return new Recommendation(best, probeScore(best),
-                "Prefer the highest expected information per bounded cost; verify one probe only");
+                ContextMessages.text("explore.recommend"));
     }
 
     /** Correlate the next exact matching tool call; unrelated actions stay untouched. */
@@ -299,7 +301,7 @@ public final class MechanismExplorer {
                 || !active.probeTool().equals(toolName)
                 || !sameJsonObject(active.probeArguments(), arguments)) return null;
         Experiment running = lifecycle(active, Status.RUNNING, actionId,
-                "Probe dispatched with args=" + compact(arguments, 240), gameTick,
+                ContextMessages.text("explore.dispatched") + compact(arguments, 240), gameTick,
                 saturatedAdd(gameTick, OBSERVATION_WINDOW_TICKS),
                 worldModel.revision(), active.attempts() + 1,
                 snapshot(active.expectedSubject(), active.expectedPredicate(), gameTick),
@@ -343,7 +345,7 @@ public final class MechanismExplorer {
         if (active == null || active.terminal()) return;
         if (!success) {
             finish(active, Status.INCONCLUSIVE,
-                    "Probe action failed before the hypothesis could be tested: "
+                    ContextMessages.text("explore.failedBeforeTest")
                             + compact(evidence, 320), gameTick);
             return;
         }
@@ -359,7 +361,7 @@ public final class MechanismExplorer {
         if (active == null || active.terminal()) return;
         if (state != TaskState.SUCCESS) {
             finish(active, Status.INCONCLUSIVE,
-                    "Probe task ended " + state + ": " + compact(evidence, 320), gameTick);
+                    ContextMessages.text("explore.taskEnded") + state + ": " + compact(evidence, 320), gameTick);
             return;
         }
         active = withProbeSucceeded(active);
@@ -374,22 +376,22 @@ public final class MechanismExplorer {
             if (gameTick >= active.deadlineTick()) {
                 finish(active, Status.INCONCLUSIVE,
                         active.status() == Status.ARMED
-                                ? "Armed probe was never dispatched"
-                                : "Probe did not reach a terminal executor state",
+                                ? ContextMessages.text("explore.notDispatched")
+                                : ContextMessages.text("explore.noTerminal"),
                         gameTick);
             }
             return;
         }
         if (matches(active, gameTick)) {
             finish(active, Status.SUPPORTED,
-                    "Observed a new declared postcondition " + expected(active), gameTick);
+                    ContextMessages.text("explore.observedPost") + expected(active), gameTick);
         } else if (contradicts(active, gameTick)) {
             finish(active, Status.REFUTED,
-                    "Observed a new contradictory value for " + expected(active), gameTick);
+                    ContextMessages.text("explore.contradictory") + expected(active), gameTick);
         } else if (gameTick >= active.deadlineTick()) {
             String reason = unchangedFromBaseline(active, gameTick)
-                    ? "Post-state was unchanged from baseline; no causal evidence for "
-                    : "Observation window expired without ";
+                    ? ContextMessages.text("explore.unchanged")
+                    : ContextMessages.text("explore.expired");
             finish(active, Status.INCONCLUSIVE, reason + expected(active), gameTick);
         }
     }
@@ -438,9 +440,9 @@ public final class MechanismExplorer {
         List<MechanismKnowledgeBase.Profile> profiles =
                 knowledgeBase.relevantProfiles(query, 2);
         if (active == null && relevant.isEmpty() && profiles.isEmpty()) {
-            return "Mechanism adaptation: idle\n";
+            return ContextMessages.text("explore.idle");
         }
-        StringBuilder out = new StringBuilder("Mechanism adaptation:\n");
+        StringBuilder out = new StringBuilder(ContextMessages.text("explore.heading"));
         if (active != null) out.append("- active=").append(active.id())
                 .append(" status=").append(active.status().name().toLowerCase(Locale.ROOT))
                 .append(" subject=").append(active.subject())
@@ -470,7 +472,7 @@ public final class MechanismExplorer {
             }
             out.append('\n');
         }
-        out.append("Unknown is not false: prefer a reversible, budgeted probe; require independent support before reuse.\n");
+        out.append(ContextMessages.text("explore.advice"));
         return out.toString();
     }
 
@@ -487,7 +489,7 @@ public final class MechanismExplorer {
                 if (experiment == null || experiment.id() == null) continue;
                 Status restored = experiment.terminal() ? experiment.status() : Status.INCONCLUSIVE;
                 String evidence = experiment.terminal() ? experiment.evidence()
-                        : "Experiment was interrupted by a game restart; body ownership was not restored";
+                        : ContextMessages.text("explore.restart");
                 Experiment normalized = lifecycle(experiment, restored, null, evidence,
                         experiment.actionTick(), experiment.deadlineTick(),
                         experiment.baselineWorldRevision(), experiment.attempts(),
@@ -513,16 +515,16 @@ public final class MechanismExplorer {
     private void beginObservation(Experiment experiment, String evidence, long gameTick) {
         if (matches(experiment, gameTick)) {
             finish(experiment, Status.SUPPORTED,
-                    "Probe succeeded and observed a new " + expected(experiment), gameTick);
+                    ContextMessages.text("explore.supported") + expected(experiment), gameTick);
             return;
         }
         if (contradicts(experiment, gameTick)) {
             finish(experiment, Status.REFUTED,
-                    "Probe observed a new contradictory value for " + expected(experiment), gameTick);
+                    ContextMessages.text("explore.refuted") + expected(experiment), gameTick);
             return;
         }
         Experiment observing = lifecycle(experiment, Status.OBSERVING,
-                experiment.actionId(), "Probe succeeded; awaiting " + expected(experiment)
+                experiment.actionId(), ContextMessages.text("explore.awaiting") + expected(experiment)
                         + ". Result=" + compact(evidence, 240), experiment.actionTick(),
                 saturatedAdd(gameTick, OBSERVATION_WINDOW_TICKS),
                 experiment.baselineWorldRevision(), experiment.attempts(),
@@ -614,7 +616,7 @@ public final class MechanismExplorer {
     private Experiment compensate(Experiment experiment) {
         if (compensationDispatcher == null) {
             return withCompensation(experiment, true, false,
-                    experiment.evidence() + "; compensation unavailable in this runtime");
+                    experiment.evidence() + ContextMessages.text("explore.noCompensation"));
         }
         CompensationResult result;
         try {

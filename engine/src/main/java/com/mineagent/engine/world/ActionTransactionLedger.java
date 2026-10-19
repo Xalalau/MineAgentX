@@ -1,5 +1,7 @@
 package com.mineagent.engine.world;
 
+import com.mineagent.engine.i18n.ContextMessages;
+
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -163,22 +165,22 @@ public final class ActionTransactionLedger {
     }
 
     public synchronized String summarizeForPrompt(long gameTick) {
-        StringBuilder out = new StringBuilder("Action transactions:\n");
+        StringBuilder out = new StringBuilder(ContextMessages.text("actions.heading"));
         List<Transaction> recent = transactions.values().stream()
                 .sorted(Comparator.comparingLong(Transaction::updatedTick).reversed())
                 .limit(6).toList();
-        if (recent.isEmpty()) return "Action transactions: none\n";
+        if (recent.isEmpty()) return ContextMessages.text("actions.empty");
         for (Transaction value : recent) {
             out.append("- ").append(value.id()).append(' ')
                     .append(value.tool()).append(" status=")
                     .append(value.status().name().toLowerCase(Locale.ROOT))
                     .append(" pre=").append(value.preStateHash())
                     .append(" post=").append(value.postStateHash());
-            if (!value.observedDelta().isBlank()) out.append(" evidence=")
+            if (!value.observedDelta().isBlank()) out.append(ContextMessages.text("field.evidence"))
                     .append(value.observedDelta());
             out.append('\n');
         }
-        out.append("Only VERIFIED actions may be assumed complete; retry or replan unverified actions.\n");
+        out.append(ContextMessages.text("actions.advice"));
         return out.toString();
     }
 

@@ -1,5 +1,7 @@
 package com.mineagent.engine.world;
 
+import com.mineagent.engine.i18n.ContextMessages;
+
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -454,7 +456,7 @@ public final class SemanticWorldModel {
                                 Comparator.reverseOrder()))
                 .limit(Math.min(8, limit)).toList();
         if (relevant.isEmpty()) return "";
-        StringBuilder out = new StringBuilder("Relevant long-term memory:\n");
+        StringBuilder out = new StringBuilder(ContextMessages.text("semantic.recall"));
         for (ScoredEvent value : relevant) {
             SemanticEvent event = value.event();
             out.append("- ").append(event.subject()).append(' ')
@@ -463,8 +465,8 @@ public final class SemanticWorldModel {
             if (event.position() != null) {
                 out.append(" @ ").append(event.position().compact());
             }
-            out.append(" source=").append(compact(event.source(), 80))
-                    .append(" age_ticks=")
+            out.append(ContextMessages.text("field.source")).append(compact(event.source(), 80))
+                    .append(ContextMessages.text("field.ageTicks"))
                     .append(Math.max(0L, gameTick - event.gameTick())).append('\n');
         }
         return out.toString();
@@ -508,16 +510,16 @@ public final class SemanticWorldModel {
                         && !fact.subject().startsWith("profile:"))
                 .sorted(Comparator.comparingLong(SemanticFact::observedTick).reversed())
                 .limit(8).toList();
-        if (active.isEmpty()) return "Semantic world model: no active facts\n";
-        StringBuilder out = new StringBuilder("Semantic world model (temporal evidence):\n");
+        if (active.isEmpty()) return ContextMessages.text("semantic.empty");
+        StringBuilder out = new StringBuilder(ContextMessages.text("semantic.heading"));
         for (SemanticFact fact : active) {
             out.append("- ").append(fact.subject()).append(' ')
                     .append(fact.predicate()).append('=').append(fact.value())
-                    .append(" confidence=").append(format(fact.confidenceAt(gameTick)))
-                    .append(" age=").append(Math.max(0L, gameTick - fact.observedTick()))
-                    .append(fact.durable() ? " durable" : " volatile").append('\n');
+                    .append(ContextMessages.text("field.confidence")).append(format(fact.confidenceAt(gameTick)))
+                    .append(ContextMessages.text("field.age")).append(Math.max(0L, gameTick - fact.observedTick()))
+                    .append(fact.durable() ? ContextMessages.text("semantic.durable") : ContextMessages.text("semantic.volatile")).append('\n');
         }
-        out.append("Treat expired or low-confidence facts as unknown and gather reversible evidence.\n");
+        out.append(ContextMessages.text("semantic.advice"));
         return out.toString();
     }
 

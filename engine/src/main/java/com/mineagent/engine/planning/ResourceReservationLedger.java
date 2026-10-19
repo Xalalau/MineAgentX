@@ -1,5 +1,7 @@
 package com.mineagent.engine.planning;
 
+import com.mineagent.engine.i18n.ContextMessages;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -90,11 +92,11 @@ public final class ResourceReservationLedger {
 
     public synchronized String summarizeForPrompt(long tick) {
         expire(tick);
-        if (reservations.isEmpty()) return "Reservations: none\n";
-        StringBuilder out = new StringBuilder("Reservations (temporary claims):\n");
+        if (reservations.isEmpty()) return ContextMessages.text("reservations.empty");
+        StringBuilder out = new StringBuilder(ContextMessages.text("reservations.heading"));
         reservations.values().stream().sorted(Comparator.comparing(Reservation::resource))
                 .limit(12).forEach(value -> out.append("- ").append(value.resource())
-                        .append(" for ").append(value.purpose()).append(" until ")
+                        .append(ContextMessages.text("reservations.for")).append(value.purpose()).append(ContextMessages.text("reservations.until"))
                         .append(value.expiresTick()).append('\n'));
         return out.toString();
     }

@@ -1,5 +1,7 @@
 package com.mineagent.engine.memory;
 
+import com.mineagent.engine.i18n.ContextMessages;
+
 import net.minecraft.core.BlockPos;
 
 import java.util.*;
@@ -259,7 +261,7 @@ public class CognitiveMap {
         if (verified.isEmpty()) return "";
 
         StringBuilder sb = new StringBuilder();
-        sb.append("## Spatial memory\n");
+        sb.append(ContextMessages.text("spatial.heading"));
         int shown = 0;
         Map<String, Integer> perTopCategory = new HashMap<>();
         for (ScoredPoi value : verified) {
@@ -270,11 +272,11 @@ public class CognitiveMap {
             int count = perTopCategory.getOrDefault(topCat, 0);
             if (count >= 2) continue;
             sb.append("- ").append(poi.label())
-              .append(" at (").append(poi.x()).append(",")
+              .append(ContextMessages.text("place.at")).append(poi.x()).append(",")
               .append(poi.y()).append(",").append(poi.z()).append(")")
               .append(" [").append(poi.dimension()).append("]");
             if (poi.visitCount() > 2) {
-                sb.append(" [confirmed x").append(poi.visitCount()).append("]");
+                sb.append(ContextMessages.text("spatial.confirmed")).append(poi.visitCount()).append("]");
             }
             sb.append("\n");
             perTopCategory.put(topCat, count + 1);

@@ -43,7 +43,7 @@ public final class AdaptationRuntime {
         SkillLibrary.Skill existing = skillLibrary.get(skillName).orElse(null);
         if (existing == null || !existing.actionSequence().equals(sequence)) {
             skillLibrary.upsertVerifiedAdaptation(skillName,
-                    "Verified adapter for " + rule.subject() + ": " + rule.hypothesis(),
+                    com.mineagent.engine.i18n.ContextMessages.text("adaptation.verified") + rule.subject() + ": " + rule.hypothesis(),
                     rule.subject() + " " + rule.hypothesis(), sequence);
         }
         knowledgeBase.attachAdapter(rule.id(), skillName);
