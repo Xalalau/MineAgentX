@@ -9,7 +9,13 @@ import com.mineagent.api.llm.provider.*;
 import com.mineagent.api.platform.Services;
 import com.mineagent.api.task.*;
 import com.mineagent.engine.MineAgentEngine;
+import com.mineagent.engine.execution.ExecutionOwner;
+import com.mineagent.engine.execution.ExecutionProtocol;
+import com.mineagent.api.execution.ExecutionToken;
 import com.mineagent.engine.persona.PersonaProfile;
+import com.mineagent.engine.identity.*;
+import com.mineagent.api.i18n.RuntimeLanguage;
+import com.mineagent.api.i18n.ModelText;
 import com.mineagent.engine.persona.EmotionState;
 import com.mineagent.engine.memory.PlaceEventMemory;
 import com.mineagent.engine.memory.ReflectionSystem;
@@ -144,7 +150,7 @@ public class AgentLoop {
             "auto_mine", "build", "craft", "lookup_recipe", "interact_at",
             "collect_items", "eat_item", "use_item", "equip_item", "transfer_items",
             "melee_attack", "todowrite", "task_status", "task_stop",
-            "wait_for", "query_extra_tools");
+            "wait_for", "query_extra_tools", "identity_memory");
     private static final Set<String> SKILL_ACTION_TOOLS = Set.of(
             "goto", "auto_mine", "build", "melee_attack", "ranged_attack",
             "equip_item", "eat_item", "drop_items", "collect_items",
@@ -158,6 +164,11 @@ public class AgentLoop {
             "get_self_status", "get_owner_status", "get_world_info",
             "resolve_need", "plan_acquisition", "lookup_recipe", "inspect_block",
             "inspect_block_storage", "inspect_gui", "recall_memory");
+    // Only live observations, not recall, planning predictions or self-authored identity output.
+    private static final Set<String> IDENTITY_OBSERVATION_TOOLS = Set.of(
+            "look_around", "scan_blocks", "scan_nearby_entities", "get_self_status",
+            "get_owner_status", "get_world_info", "lookup_recipe", "inspect_block",
+            "inspect_block_storage", "inspect_gui", "locate_structure", "locate_biome");
     private static final Set<String> INVENTORY_EXTRA_TOOLS = Set.of(
             "drop_items", "inspect_gui", "close_gui", "inspect_block_storage");
     private static final Set<String> PERCEPTION_EXTRA_TOOLS = Set.of(
@@ -209,6 +220,9 @@ public class AgentLoop {
      * old response to complete).
      */
     private final AtomicLong eventGeneration = new AtomicLong();
+    private final ExecutionOwner executionOwner = new ExecutionOwner(System::nanoTime,
+            task -> Services.platform().scheduleOnServer(task));
+    private volatile ExecutionOwner.Lease activeSkillLease;
     private final Set<String> exposedExtraTools = ConcurrentHashMap.newKeySet();
     private record PendingSkillAction(String description,
                                       ChatMessage.ToolCallRef call) {}
@@ -268,6 +282,9 @@ public class AgentLoop {
 
     // ── Cognitive subsystems ──
     private final PersonaProfile persona;
+    private final EvolvingIdentity identity = new EvolvingIdentity();
+    private final IdentityReflection identityReflection = new IdentityReflection(identity);
+    private final IdentityMemoryAccess identityMemoryAccess = new IdentityMemoryAccess(identity, identityReflection, eventGeneration::get);
     private final EmotionState emotion;
     private final PlaceEventMemory placeMemory;
     private final SkillLibrary skillLib;
@@ -349,7 +366,7 @@ public class AgentLoop {
                         model, conversationIdentity, null, null, 0L));
 
         // Initialize cognitive subsystems
-        this.persona = PersonaProfile.random();
+        this.persona = new PersonaProfile(.5f, .5f, .5f, .5f, .5f, new String[0]);
         this.emotion = new EmotionState();
         this.placeMemory = new PlaceEventMemory();
         this.skillLib = new SkillLibrary();
@@ -415,7 +432,7 @@ public class AgentLoop {
                     planner, beliefState, worldAssetIndex, experienceStore,
                     skillLib, semanticWorldModel, rollingPlanner,
                     mechanismExplorer, history, cognitiveState, layeredMemory,
-                    actionLedger, reservationLedger);
+                    actionLedger, reservationLedger).attachIdentity(identity, identityReflection);
             p.loadAll();
             // A restored Responses response id already represents the durable
             // dialogue prefix.  Sending that prefix again duplicates turns and
@@ -485,7 +502,7 @@ public class AgentLoop {
                 // Generation advances only for a newly admitted decision event.
                 // Previously every repeated blocked heartbeat advanced it and
                 // interrupted the same HTTP request hundreds of times.
-                eventGeneration.incrementAndGet();
+                executionOwner.invalidate(eventGeneration::incrementAndGet);
                 Thread activeCall = activeLLMCallThread.get();
                 if (activeCall != null) activeCall.interrupt();
             }
@@ -497,7 +514,7 @@ public class AgentLoop {
         if (!reasonAlreadyRecorded(reason)) {
             enqueueInbox(reason);
         }
-        eventGeneration.incrementAndGet();
+        executionOwner.invalidate(eventGeneration::incrementAndGet);
         startTurn(reason);
     }
 
@@ -566,6 +583,10 @@ public class AgentLoop {
      * Add an owner message and wake the loop.
      */
     public void onOwnerMessage(String message) {
+        if (message == null || message.isBlank()) return;
+        executionOwner.revokeAll(executionUnavailable(), eventGeneration::incrementAndGet);
+        identityReflection.close();
+        identity.recordEvidence("player_claim", "owner", message, liveAssetGameTick.get());
         // Track last owner command for decision cache keying
         lastOwnerCommand = message.length() > 120 ? message.substring(0, 120) : message;
         // Keep a separate, bounded objective. The cache key deliberately uses
@@ -580,24 +601,7 @@ public class AgentLoop {
                 currentGameTickSafe(), 400L, "current", "current");
         cognitiveState.append("owner_intent", "owner", truncateForLog(message, 300),
                 currentGameTickSafe());
-        // Observe player intent for Theory of Mind
-        // TheoryOfMind uses game ticks for its decay window. Passing epoch
-        // milliseconds here made a documented 60-second window last about
-        // 1.2 seconds when mixed with server observations.
-        long gameTime = currentGameTickSafe();
-        theoryOfMind.observe(message, gameTime);
-        // Detect feedback tone (simple heuristic)
-        String lower = message.toLowerCase();
-        if (lower.contains("thanks") || lower.contains("good")) {
-            theoryOfMind.onPlayerFeedback(true);
-            emotion.onPraised();
-            persona.drift(true);
-        } else if (lower.contains("stupid") || lower.contains("no")
-                || lower.contains("stop")) {
-            theoryOfMind.onPlayerFeedback(false);
-            emotion.onScolded();
-            persona.drift(false);
-        }
+        // Speech remains a sourced report; only evidence-backed reflection revises identity.
         synchronized (history) {
             history.add(ChatMessage.user(message));
         }
@@ -612,30 +616,10 @@ public class AgentLoop {
         layeredMemory.remember(LayeredMemory.Tier.WORKING, "body.observation",
                 truncateForLog(narrative, 300), "executor", 0.9,
                 currentGameTickSafe(), 240L, "current", "current");
-        // Trigger emotions based on body event content.
-        // Use independent if-statements (not else-if) so that a single
-        // narrative containing multiple event types (e.g. "attacked by
-        // creeper near diamond") triggers ALL matching emotions. The old
-        // else-if chain only fired the first match, silently dropping the
-        // rest.
-        String lower = narrative.toLowerCase();
-        if (lower.contains("attack") || lower.contains("damage")
-                || lower.contains("hurt")) {
-            emotion.onAttacked();
+        // Keep routine body telemetry out of personal reflection; retain meaningful executor events.
+        if (isDeliberationEvent(narrative)) {
+            identity.recordEvidence("observation", "body", naturalEvent(narrative), liveAssetGameTick.get());
         }
-        if (lower.contains("danger") || lower.contains("creeper")) {
-            emotion.onSeeDanger();
-        }
-        if (lower.contains("diamond") || lower.contains("treasure")) {
-            emotion.onFindTreasure();
-        }
-        if (lower.contains("owner") && (lower.contains("hurt") || lower.contains("damage"))) {
-            emotion.onOwnerHurt();
-        }
-
-        // Record place events from body log (simple keyword detection)
-        // e.g. "saw iron_ore at (10, 64, -5)" → remember it
-        recordPlaceEventFromLog(narrative);
 
         // Low-level body observations are evidence, not independent decision
         // points. Waking on every breath/follow/pickup message created request
@@ -662,7 +646,7 @@ public class AgentLoop {
                                long gameTick) {
         boolean skillAction = skillRuntime.ownsAction(taskId);
         liveBodyState.set(new LiveBodyState(taskId, taskName, TaskState.RUNNING,
-                snapshot, snapshot == null ? "Task accepted" : snapshot.summary(), gameTick));
+                snapshot, snapshot == null ? text("Task accepted", "Tarefa aceita") : snapshot.summary(), gameTick));
         // Inner skill actions belong to one plan-level skill run. Binding every
         // inner task would falsely verify the parent plan after step one.
         if (!skillAction) {
@@ -734,6 +718,7 @@ public class AgentLoop {
                                IntentContract intent, TaskState state,
                                TaskSnapshot snapshot, String message,
                                long gameTick) {
+        executionOwner.release(taskId);
         // A terminal task no longer owns the body. Keep its outcome as compact
         // evidence, but publish a null task id so the next decision sees an
         // idle executor instead of treating SUCCESS/FAILED as body occupancy.
@@ -753,6 +738,8 @@ public class AgentLoop {
             rollingPlanner.onTaskFinished(taskId, state, gameTick);
         }
         String goal = intent == null ? taskName : intent.goal();
+        identity.recordEvidence("observation", "task:" + taskId,
+                taskName + ": " + state + "; " + goal + "; " + (message == null ? "" : message), gameTick);
         ExperienceStore.Experience experience = experienceStore.record(
                 taskId, taskName, goal, state, snapshot, message, gameTick);
         PendingSkillAction pendingAction = pendingTaskActions.remove(taskId);
@@ -1040,6 +1027,7 @@ public class AgentLoop {
      * Cancel the current turn and clear the inbox.
      */
     public synchronized void cancel() {
+        identityReflection.close();
         synchronized (inboxLock) {
             inbox.clear();
         }
@@ -1047,7 +1035,7 @@ public class AgentLoop {
         // that is still queued for the server thread. An action that has already
         // entered vanilla code cannot be rolled back generically, but no stale
         // response is allowed to start new work after this point.
-        eventGeneration.incrementAndGet();
+        executionOwner.revokeAll(executionUnavailable(), eventGeneration::incrementAndGet);
         Thread activeCall = activeLLMCallThread.get();
         if (activeCall != null) activeCall.interrupt();
     }
@@ -1095,6 +1083,18 @@ public class AgentLoop {
     public ExperienceStore experienceStore() { return experienceStore; }
     public ReflectionSystem reflection() { return reflection; }
     public PersonaProfile persona() { return persona; }
+    public EvolvingIdentity identity() { return identity; }
+    public synchronized String identityMemory(com.google.gson.JsonObject args) {
+        if (suspended) identityReflection.close();
+        return identityMemoryAccess.execute(args, RuntimeLanguage.language().id());
+    }
+    public EvolvingIdentity.Entry reviseIdentity(String kind, String subject, String statement,
+            String reason, List<String> evidenceIds, double confidence, long expectedRevision,
+            String reconsideration) {
+        if (suspended) throw new IllegalArgumentException("reflection_closed_or_stale");
+        return identityReflection.revise(eventGeneration.get(), kind, subject, statement, reason,
+                evidenceIds, confidence, expectedRevision, reconsideration);
+    }
     public MinecraftKnowledgeGraph knowledgeGraph() { return knowledgeGraph; }
     public DecisionCache decisionCache() { return decisionCache; }
     public CognitiveState cognitiveState() { return cognitiveState; }
@@ -1115,20 +1115,32 @@ public class AgentLoop {
     /** Admit a learned sequence as one plan-level action, not N unrelated tasks. */
     public SkillRuntime.StartResult startSkill(String skillName,
                                                com.google.gson.JsonObject overrides) {
+        long ownerRevision = executionOwner.revision();
+        if (suspended || !ExecutionToken.active()) {
+            return new SkillRuntime.StartResult(false, null, executionUnavailable());
+        }
         long gameTick = currentGameTickSafe();
         LiveBodyState body = liveBodyState.get();
         if (body != null && body.taskId() != null) {
             return new SkillRuntime.StartResult(false, null,
-                    "Body is busy with task " + body.taskId());
+                    text("Body is busy with task ", "O corpo está ocupado com a tarefa ") + body.taskId());
         }
         SkillRuntime.StartResult result = skillRuntime.start(
                 skillName, overrides, gameTick);
         if (result.accepted()) {
+            ExecutionOwner.Lease lease = executionOwner.open(result.runId(),
+                    () -> !suspended && executionOwner.revision() == ownerRevision,
+                    Long.MAX_VALUE, () -> cancelOwnedSkillNow(result.runId()));
+            activeSkillLease = lease;
+            if (!lease.active() || !ExecutionToken.active()) {
+                lease.requestCancellation();
+                return new SkillRuntime.StartResult(false, result.runId(), executionUnavailable());
+            }
             PlanGraph.PlanNode current = planner.nodeForAction();
             boolean hadPlan = planner.hasActivePlan();
             IntentContract contract = current == null
-                    ? IntentContract.generic("Execute learned skill " + skillName,
-                    "Every skill step and declared effect is verified", null, null, null)
+                    ? IntentContract.generic(text("Execute learned skill ", "Execute a habilidade aprendida ") + skillName,
+                    text("Every skill step and declared effect is verified", "Cada etapa da habilidade e efeito declarado é verificado"), null, null, null)
                     : IntentContract.generic(current.description(),
                     current.successCriterion(), null, null, null);
             planner.bindTask(result.runId(), "execute_skill", contract, gameTick);
@@ -1142,88 +1154,47 @@ public class AgentLoop {
         return result;
     }
 
-    /** Called on the server thread by SkillRuntime; the scheduler still owns body admission. */
+    /** Skill steps use the same admission, terminal publication and revocation protocol as direct tools. */
     private SkillRuntime.DispatchResult dispatchSkillAction(
             String actionId, String toolName, com.google.gson.JsonObject arguments) {
         Optional<Tool> toolValue = ToolRegistry.get(toolName);
         if (toolValue.isEmpty()) {
             return new SkillRuntime.DispatchResult(false, false, false,
-                    "Stored tool is no longer registered: " + toolName);
+                    text("Stored tool is no longer registered: ", "A ferramenta armazenada não está mais registrada: ") + toolName);
         }
         Tool tool = toolValue.get();
+        ExecutionOwner.Lease skillLease = activeSkillLease;
+        boolean ownedSkillAction = skillRuntime.ownsAction(actionId);
+        if (suspended || (ownedSkillAction && (skillLease == null || !skillLease.active()))) {
+            return new SkillRuntime.DispatchResult(false, tool.dispatchesAsyncTask(), false, executionUnavailable());
+        }
         LiveBodyState body = liveBodyState.get();
         if (tool.dispatchesAsyncTask() && body != null && body.taskId() != null) {
             return new SkillRuntime.DispatchResult(false, true, false,
-                    "Body is busy with task " + body.taskId());
+                    text("Body is busy with task ", "O corpo está ocupado com a tarefa ") + body.taskId());
         }
-        // Capture the transaction checkpoint before recording the ACTION
-        // event. Otherwise the audit entry's "before" state already contains
-        // the operation it is supposed to verify.
-        actionLedger.begin(actionId, toolName, "server tool callback and terminal task evidence",
-                semanticWorldModel, currentGameTickSafe());
-        semanticWorldModel.recordAction(toolName, arguments.toString(),
-                actionId, currentGameTickSafe());
-        dispatchedActionTools.put(actionId, toolName);
-        AtomicReference<String> callback = new AtomicReference<>();
-        try {
-            tool.onServerCall(actionId, arguments, companion,
-                    result -> callback.compareAndSet(null, result));
-        } catch (Throwable failure) {
-            String detail = toolErrorJson(toolName, failure);
-            actionLedger.finish(actionId, ActionTransactionLedger.Status.FAILED,
-                    detail, semanticWorldModel, currentGameTickSafe());
-            semanticWorldModel.recordOutcome(toolName, false, detail,
-                    actionId, currentGameTickSafe(), true);
-            dispatchedActionTools.remove(actionId);
-            return new SkillRuntime.DispatchResult(false,
-                    tool.dispatchesAsyncTask(), false, detail);
+        ToolExecution execution = prepareExecution(actionId, tool, eventGeneration.get(),
+                () -> !ownedSkillAction || (skillLease != null && skillLease.active()));
+        dispatchExecution(execution, tool, arguments);
+        // SkillRuntime's dispatcher is deliberately immediate. A tool that defers its admission
+        // callback is revoked here; its eventual real-world receipt is reconciled separately.
+        execution.call().requireImmediate(executionUnavailable());
+        if (execution.call().terminal().state() == ExecutionProtocol.State.EXPIRED) {
+            execution.lease().requestCancellation();
+            markExecutionUnverified(execution);
         }
-        String raw = callback.get();
-        if (raw == null) {
-            String detail = "Tool violated callback contract and returned no result";
-            actionLedger.finish(actionId, ActionTransactionLedger.Status.FAILED,
-                    detail, semanticWorldModel, currentGameTickSafe());
-            semanticWorldModel.recordOutcome(toolName, false, detail,
-                    actionId, currentGameTickSafe(), true);
-            dispatchedActionTools.remove(actionId);
-            return new SkillRuntime.DispatchResult(false,
-                    tool.dispatchesAsyncTask(), false, detail);
-        }
-        FailureAnalysis analysis = analyzeFailure(raw);
-        boolean asynchronous = "async_pending".equals(analysis.errorType());
-        boolean success = asynchronous || analysis.isSuccess();
-        if (!asynchronous) {
-            dispatchedActionTools.remove(actionId);
-            // Verify against the tool's authoritative post-read before the
-            // OUTCOME event advances the semantic revision.
-            var transaction = actionLedger.finishObserved(actionId, success, raw,
-                    semanticWorldModel, currentGameTickSafe());
-            boolean verified = transaction != null
-                    && transaction.status() == ActionTransactionLedger.Status.VERIFIED;
-            semanticWorldModel.recordOutcome(toolName, verified, raw,
-                    actionId, currentGameTickSafe(), true);
-            success = verified;
-        } else {
-            actionLedger.markPending(actionId, semanticWorldModel,
-                    currentGameTickSafe(), raw);
-        }
-        mechanismExplorer.onToolDispatched(actionId, toolName,
-                arguments.toString(), currentGameTickSafe());
-        mechanismExplorer.onToolResult(actionId, toolName, success, asynchronous,
-                raw, currentGameTickSafe());
-        return new SkillRuntime.DispatchResult(success, asynchronous,
-                success, raw);
+        String raw = execution.call().terminal().payload();
+        boolean completed = execution.call().terminal().state() == ExecutionProtocol.State.COMPLETED;
+        boolean asynchronous = completed && "async_pending".equals(analyzeFailure(raw).errorType());
+        boolean success = completed && execution.verified().get();
+        return new SkillRuntime.DispatchResult(success, asynchronous, success, raw);
     }
 
-    /** Cancel an inner asynchronous skill task by its exact action id. */
+    /** Revocation is immediate; exact task cleanup always executes later on the server. */
     private void cancelSkillAction(String actionId) {
         if (actionId == null || actionId.isBlank()) return;
-        try {
-            MineAgentEngine.getCompanion(companion.companionId())
-                    .ifPresent(state -> state.auction.cancelTask(actionId));
-        } catch (Throwable failure) {
-            System.err.println("[MineAgent] Failed to cancel timed-out skill action "
-                    + actionId + ": " + failure.getMessage());
+        if (!executionOwner.revoke(actionId, executionUnavailable())) {
+            Services.platform().scheduleOnServer(() -> cancelOwnedTaskNow(actionId));
         }
     }
 
@@ -1241,12 +1212,12 @@ public class AgentLoop {
             var element = com.google.gson.JsonParser.parseString(arguments);
             if (!element.isJsonObject()) {
                 return new MechanismExplorer.CompensationResult(false, false,
-                        false, "Compensation arguments are not a JSON object");
+                        false, text("Compensation arguments are not a JSON object", "Os argumentos de compensação não são um objeto JSON"));
             }
             parsed = element.getAsJsonObject();
         } catch (RuntimeException malformed) {
             return new MechanismExplorer.CompensationResult(false, false,
-                    false, "Invalid compensation arguments: " + malformed.getMessage());
+                    false, text("Invalid compensation arguments: ", "Argumentos de compensação inválidos: ") + malformed.getMessage());
         }
         SkillRuntime.DispatchResult result = dispatchSkillAction(actionId,
                 toolName, parsed);
@@ -1254,7 +1225,14 @@ public class AgentLoop {
                 result.asynchronous(), result.success(), result.evidence());
     }
 
+    private void cancelOwnedSkillNow(String runId) {
+        if (Objects.equals(skillRuntime.snapshot().runId(), runId) && skillRuntime.active()) {
+            skillRuntime.cancel(text("Execution revoked", "Execução revogada"), currentGameTickSafe());
+        }
+    }
+
     private void onSkillRuntimeCompleted(SkillRuntime.Snapshot snapshot) {
+        executionOwner.release(snapshot.runId());
         long gameTick = snapshot.updatedTick();
         boolean success = snapshot.status() == SkillRuntime.Status.SUCCEEDED;
         TaskState taskState = success ? TaskState.SUCCESS
@@ -1299,42 +1277,7 @@ public class AgentLoop {
      */
     private void prepareToolsForOwnerIntent(String message) {
         exposedExtraTools.clear();
-        String intent = message == null ? "" : message.toLowerCase(Locale.ROOT);
-        if (containsAny(intent, "give", "drop", "hand", "transfer", "store",
-                "retrieve")) {
-            exposeExtraTools(INVENTORY_EXTRA_TOOLS);
-        }
-        if (containsAny(intent, "craft", "make", "smelt", "cook", "recipe")) {
-            exposeExtraTools(GUI_EXTRA_TOOLS);
-        }
-        if (containsAny(intent, "mine", "gather", "collect", "find", "resource")) {
-            exposeExtraTools(PERCEPTION_EXTRA_TOOLS);
-        }
-        if (containsAny(intent, "fight", "attack", "defend", "kill", "combat")) {
-            exposeExtraTools(COMBAT_EXTRA_TOOLS);
-        }
-        if (containsAny(intent, "locate", "biome", "structure", "explore", "where")) {
-            exposeExtraTools(LOCATION_EXTRA_TOOLS);
-        }
-        if (containsAny(intent, "interact", "open", "inspect", "use", "click")) {
-            exposeExtraTools(GUI_EXTRA_TOOLS);
-            exposeExtraTools(Set.of("interact_entity"));
-        }
-        if (containsAny(intent, "team", "teammate", "coordinate", "cooperate")) {
-            exposeExtraTools(Set.of("coordinate_team"));
-        }
-        if (containsAny(intent, "mod", "mechanism", "machine", "unknown", "experiment")) {
-            exposeExtraTools(Set.of("explore_mechanism"));
-        }
-        // Once an inspected unfamiliar object is relevant to the new goal,
-        // expose controlled exploration even when the owner's wording does not
-        // literally contain "mod" or "machine".
-        if (mechanismExplorer.hasRelevantNovelty(intent)) {
-            exposeExtraTools(Set.of("explore_mechanism"));
-        }
-        if (!skillLib.retrieve(intent).isEmpty()) {
-            exposeExtraTools(Set.of("execute_skill", "load_skill", "list_learned_skills"));
-        }
+        // Discovery is model-driven in any language, never a keyword task classifier.
     }
 
     private static boolean containsAny(String value, String... needles) {
@@ -1369,6 +1312,7 @@ public class AgentLoop {
                     e.printStackTrace();
                 } finally {
                     synchronized (this) {
+                        identityReflection.close();
                         inProgress = false;
                         // Check if inbox accumulated during this turn. While
                         // suspended it must remain queued until resume();
@@ -1418,8 +1362,8 @@ public class AgentLoop {
                     + MAX_TOOL_ROUNDS + ") - stopping turn to prevent infinite loop");
             synchronized (history) {
                 history.add(ChatMessage.system(
-                        "[SYSTEM] You have called tools " + MAX_TOOL_ROUNDS
-                                + " times in a row. Please respond to the owner now."));
+                        text("The tool-round budget is exhausted. Report only verified progress and remaining uncertainty; do not execute more tools.",
+                                "O limite de rodadas de ferramentas foi atingido. Relate apenas progresso verificado e incertezas restantes; não execute mais ferramentas.")));
             }
             // Final LLM call to wrap up
             callLLMAndHandleResponse(roundNumber);
@@ -1438,6 +1382,12 @@ public class AgentLoop {
         if (roundNumber == 0) {
             // Reset remediation counter at the start of each turn
             remediationRoundCounter = 0;
+            LiveBodyState body = liveBodyState.get();
+            synchronized (this) {
+                identityReflection.close();
+                if (!suspended) identityReflection.open(liveAssetGameTick.get(), eventGeneration.get(),
+                        body != null && body.taskId() != null);
+            }
             // Extra schemas stay stable for the entire owner-goal episode.
             // Clearing them at every task_finished turn forced repeated
             // query_extra_tools calls and invalidated the provider tool prefix.
@@ -1458,54 +1408,7 @@ public class AgentLoop {
         LLMProvider provider = resolveProvider();
         List<Map<String, Object>> toolDefs = buildToolDefinitions();
 
-        // 3a. Decision cache lookup — if we have a fresh cached decision
-        //     for a similar situation, skip the LLM call entirely.
-        //     This is the biggest latency win for repetitive actions
-        //     (e.g. "mine the next block" repeated 20 times in a vein).
-        //     Only applied on the first round of a turn (roundNumber == 0)
-        //     to avoid caching mid-tool-call sequences.
-        //
-        //     Safety gates against confused memories and endless cached repetition:
-        //     1. Player spoke within 30 seconds -> no cache (conversation needs real understanding).
-        //     2. At least 2 consecutive hits -> force an LLM call to prevent loops.
-        //     3. TTL is shortened to 10 seconds to reduce risks from changing situations.
-        if (DECISION_CACHE_ENABLED && roundNumber == 0 && !shouldSkipCache()) {
-            String cacheKey = buildDecisionCacheKey();
-            // buildDecisionCacheKey may return null (e.g. companion state
-            // not yet available). ConcurrentHashMap forbids null keys, so we
-            // must skip both read and write when cacheKey is null.
-            if (cacheKey != null) {
-                String cachedDecision = decisionCache.getDecision(cacheKey);
-                if (cachedDecision != null && !cachedDecision.isBlank()) {
-                    metrics.recordDecisionCache(true);
-                    // Safety: don't replay the same text if it's identical to
-                    // the last assistant message — this means the AI is stuck
-                    // in a "say but don't do" loop. Force a fresh LLM call.
-                    if (isSameAsLastAssistant(cachedDecision)) {
-                        System.out.println("[MineAgent] Cache hit but content identical "
-                                + "to last response — skipping cache to avoid loop");
-                        consecutiveCacheHits = 0;
-                        // Fall through to LLM call
-                    } else {
-                        // Cache hit — synthesize an assistant message from cache.
-                        ChatMessage cachedMsg = ChatMessage.assistant(cachedDecision, null);
-                        synchronized (history) {
-                            history.add(cachedMsg);
-                        }
-                        speakToOwner(cachedDecision);
-                        consecutiveCacheHits++;
-                        System.out.println("[MineAgent] Decision cache HIT (key=" + cacheKey
-                                + ", consecutive=" + consecutiveCacheHits + ")");
-                        return;
-                    }
-                }
-                else {
-                    metrics.recordDecisionCache(false);
-                }
-            }
-        }
-        // Cache miss or skipped — reset consecutive counter
-        consecutiveCacheHits = 0;
+        // Every admitted decision uses current evidence, not cached dialogue.
 
         // 3b. Call the LLM (with retry on transient errors)
         VersionedResponse versioned = callLLMWithRetry(provider, toolDefs, roundNumber);
@@ -1561,83 +1464,13 @@ public class AgentLoop {
             advanceProviderHistoryCursor(provider);
         }
 
-        // 3c. Store the decision in cache for future reuse.
-        //     Only cache text-only responses (no tool_calls) to avoid
-        //     replaying stale tool sequences. Text responses to simple
-        //     status queries are highly reusable.
-        //
-        //     CRITICAL: Only cache responses that EXPLICITLY declare no
-        //     action via the [NO_ACTION] marker (see Action
-        //     Intent Declaration Protocol in system prompt). Responses
-        //     without the marker are ambiguous — they might contain
-        //     unstated action intent that would cause "say but don't do"
-        //     loops if replayed from cache.
-        //
-        //     This replaces the old containsActionIntent() keyword check
-        //     with a stricter, language-agnostic, LLM-driven declaration.
-        if (DECISION_CACHE_ENABLED && roundNumber == 0
-                && (assistantMsg.toolCalls() == null || assistantMsg.toolCalls().isEmpty())
-                && assistantMsg.content() != null && !assistantMsg.content().isBlank()
-                && hasExplicitNoActionMarker(assistantMsg.content())) {
-            String cacheKey = buildDecisionCacheKey();
-            // Skip cache write when key is null (ConcurrentHashMap forbids
-            // null keys — would throw NPE).
-            if (cacheKey != null) {
-                decisionCache.put(cacheKey, assistantMsg.content(), null);
-            }
-        }
-
         // Speak text to the owner in-game
         if (assistantMsg.content() != null && !assistantMsg.content().isBlank()) {
             speakToOwner(assistantMsg.content());
         }
 
-        // 4. Action Intent Declaration Protocol enforcement.
-        //    When LLM produces a text-only response (no tool_calls), check
-        //    whether it explicitly declared "no action" via the [NO_ACTION]
-        //    marker. If NOT, the LLM likely forgot to call a tool
-        //    (or forgot to declare no-action) — give it ONE chance to
-        //    correct itself by adding a system reminder.
-        //
-        //    This replaces the old containsActionIntent() keyword-based
-        //    detection with a stricter, language-agnostic protocol:
-        //      - marker present → LLM honestly declared no action → end turn
-        //      - marker absent  → LLM either forgot to act OR forgot to
-        //                         declare no-action → remediate (safer)
-        //
-        //    The conservative "absent marker = remediate" policy is by
-        //    design: it catches ALL "say but don't do" cases without
-        //    relying on a fragile keyword list. Cost is bounded by
-        //    MAX_REMEDIATION_ROUNDS (currently 1) so worst case is one
-        //    extra LLM call per text-only response.
-        if (assistantMsg.toolCalls() == null || assistantMsg.toolCalls().isEmpty()) {
-            if (roundNumber == 0 && assistantMsg.content() != null
-                    && !assistantMsg.content().isBlank()
-                    && !hasExplicitNoActionMarker(assistantMsg.content())
-                    && remediationRoundCounter < MAX_REMEDIATION_ROUNDS) {
-                remediationRoundCounter++;
-                System.out.println("[MineAgent] Text-only response without [NO_ACTION] "
-                        + "marker — giving remediation chance " + remediationRoundCounter
-                        + " (response: \""
-                        + truncateForLog(assistantMsg.content(), 80) + "\")");
-                synchronized (history) {
-                    history.add(ChatMessage.system(
-                            "[SYSTEM] Action Intent Declaration Protocol reminder\n"
-                            + "Your response called no tools and did not explicitly include [NO_ACTION].\n"
-                            + "Choose immediately:\n"
-                            + "  A. If you said you would act (move/mine/build/attack/collect/craft/place/etc.), "
-                            + "call the appropriate tool now (goto/auto_mine/build/craft/etc.).\n"
-                            + "  B. If no physical action is needed (only chat/report/acknowledgment), "
-                            + "include the [NO_ACTION] marker in your response.\n"
-                            + "Remember: talking is not acting. Physical actions require tool calls; "
-                            + "pure conversation must explicitly declare no action."));
-                }
-                // Give LLM another chance to call tools or declare no-action
-                callLLMAndHandleResponse(roundNumber + 1);
-                return;
-            }
-            return;
-        }
+        // Ordinary text-only conversation is complete without special markup or another model call.
+        if (assistantMsg.toolCalls() == null || assistantMsg.toolCalls().isEmpty()) return;
 
         // 5. Execute tool calls
         List<ChatMessage> toolResults = executeToolCalls(
@@ -1861,7 +1694,7 @@ public class AgentLoop {
             return node.description();
         }
         return lastOwnerCommand == null || lastOwnerCommand.isBlank()
-                ? "current task" : lastOwnerCommand;
+                ? text("current task", "tarefa atual") : lastOwnerCommand;
     }
 
     /** Preserve parameters so a learned sequence is adaptable, not a name list. */
@@ -1895,11 +1728,25 @@ public class AgentLoop {
     /**
      * Analyze tool results for success or failure by combining multiple signals.
      */
-    private FailureAnalysis analyzeFailure(String content) {
+    private static FailureAnalysis analyzeFailure(String content) {
         if (content == null) {
-            return new FailureAnalysis(true, false, "null content", "unknown");
+            return new FailureAnalysis(true, false, text("null content", "conteúdo nulo"), "unknown");
         }
 
+        // Revocation/deadline replies are execution uncertainty, not observations of a failed
+        // physical action. Do not feed synthetic timeouts into plan verification or learned failure memory.
+        try {
+            var json = com.google.gson.JsonParser.parseString(content);
+            if (json.isJsonObject()) {
+                var code = json.getAsJsonObject().get("code");
+                if (code != null && code.isJsonPrimitive() && code.getAsJsonPrimitive().isString()
+                        && ("tool_cancelled".equals(code.getAsString()) || "tool_timeout".equals(code.getAsString()))) {
+                    return new FailureAnalysis(false, false, extractErrorMessage(content), "execution_unverified");
+                }
+            }
+        } catch (RuntimeException notStructured) {
+            // Legacy tools can still return ordinary prose.
+        }
         String lower = content.toLowerCase();
 
         // An async dispatch acknowledgment means the task just started; its terminal state is unknown.
@@ -1954,11 +1801,11 @@ public class AgentLoop {
         }
 
         if (hasTimeout) {
-            return new FailureAnalysis(true, false, "Operation timed out", "timeout");
+            return new FailureAnalysis(true, false, text("Operation timed out", "A operação excedeu o prazo"), "timeout");
         }
 
         if (hasNotFound && !hasSuccessFlag) {
-            return new FailureAnalysis(true, false, "Target not found", "not_found");
+            return new FailureAnalysis(true, false, text("Target not found", "Alvo não encontrado"), "not_found");
         }
 
         // Default to success.
@@ -1968,7 +1815,7 @@ public class AgentLoop {
     /**
      * Categorize errors using general patterns rather than task-specific keywords.
      */
-    private String categorizeError(String lowerContent) {
+    private static String categorizeError(String lowerContent) {
         if (lowerContent.contains("invalid") || lowerContent.contains("illegal") ||
             lowerContent.contains("missing") || lowerContent.contains("required")) {
             return "invalid_params";
@@ -2029,7 +1876,7 @@ public class AgentLoop {
 
     /** Extract a human-readable error message from a tool result JSON. */
     private static String extractErrorMessage(String jsonContent) {
-        if (jsonContent == null) return "unknown error";
+        if (jsonContent == null) return text("unknown error", "erro desconhecido");
         // Simple extraction: find "error":"..." or "error":"..."
         int idx = jsonContent.indexOf("\"error\"");
         if (idx < 0) idx = jsonContent.indexOf("\"failed\"");
@@ -2085,6 +1932,7 @@ public class AgentLoop {
     private VersionedResponse callLLMWithRetry(LLMProvider provider,
                                                 List<Map<String, Object>> toolDefs,
                                                 int roundNumber) {
+        refreshSystemPromptIfNeeded();
         List<ChatMessage> messagesToSend;
         List<ChatMessage> fallbackHistory;
         List<ConversationItem> transportItems;
@@ -2101,14 +1949,12 @@ public class AgentLoop {
             fallbackHistory = new ArrayList<>(history);
             transportItems = opaqueTransportItems(providerTransportState.get());
         }
-        if (roundNumber == 0) {
-            // Keep volatile state at the final message. It is intentionally not
-            // persisted: on the next request the unchanged static prompt and
-            // prior dialogue remain a reusable provider-cache prefix.
-            ChatMessage live = ChatMessage.user(buildLiveContext());
-            messagesToSend.add(live);
-            fallbackHistory.add(live);
-        }
+        // Every decision round receives current evidence and learned commitments,
+        // including changes retained by a synchronous identity_memory call.
+        // Keep this compact volatile tail out of durable dialogue and the stable prefix.
+        ChatMessage live = ChatMessage.user(buildLiveContext());
+        messagesToSend.add(live);
+        fallbackHistory.add(live);
         messagesToSend = Collections.unmodifiableList(messagesToSend);
 
         // Use a monotonic counter rather than wall-clock time. Two owner events
@@ -2204,7 +2050,7 @@ public class AgentLoop {
                 }
 
                 if (!retryable) {
-                    speakToOwner("§c[Error] LLM request failed: " + msg);
+                    speakToOwner(text("§cModel request failed: ", "§cA solicitação ao modelo falhou: ") + msg);
                     return null;
                 }
 
@@ -2220,8 +2066,7 @@ public class AgentLoop {
                 } else {
                     System.err.println("[MineAgent] All LLM retries exhausted");
                     // Notify the owner about the failure
-                    speakToOwner("§c[Error] LLM call failed after " + MAX_RETRIES
-                            + " retries: " + msg);
+                    speakToOwner(text("§cModel request failed after the retry limit: ", "§cA solicitação ao modelo falhou após o limite de tentativas: ") + msg);
                     return null;
                 }
             }
@@ -2383,7 +2228,7 @@ public class AgentLoop {
             if (start > 1) {
                 String summary = summarizeOldMessages(1, start);
                 if (!summary.isBlank()) {
-                    trimmed.add(ChatMessage.system("[SUMMARY] " + summary));
+                    trimmed.add(ChatMessage.system(text("Conversation summary. ", "Resumo da conversa. ") + summary));
                 }
             }
 
@@ -2432,7 +2277,7 @@ public class AgentLoop {
         trimmed.add(systemPrompt);
         if (start > 1) {
             String summary = summarizeOldMessages(1, start);
-            if (!summary.isBlank()) trimmed.add(ChatMessage.system("[SUMMARY] " + summary));
+            if (!summary.isBlank()) trimmed.add(ChatMessage.system(text("Conversation summary. ", "Resumo da conversa. ") + summary));
         }
         int keptPrefix = trimmed.size();
         // Keep the complete recent range, including any unsent suffix. Do not
@@ -2493,7 +2338,7 @@ public class AgentLoop {
             if ("user".equals(role)) {
                 // Keep 200 characters of player instructions, not 80, to preserve task requirements.
                 String snippet = content.length() > 200 ? content.substring(0, 200) + "..." : content;
-                sb.append("Player: ").append(snippet).append("; ");
+                sb.append(text("Earlier user-role message: ", "Mensagem anterior em papel de usuário: ")).append(snippet).append("; ");
                 count++;
             } else if ("assistant".equals(role)) {
                 // Assistant: if has tool_calls, list tool names; else first 100 chars of text
@@ -2503,35 +2348,35 @@ public class AgentLoop {
                         if (tools.length() > 0) tools.append(",");
                         tools.append(tc.name());
                     }
-                    sb.append("AI calls[").append(tools).append("]; ");
+                    sb.append(text("Assistant called tools: ", "Assistente chamou ferramentas: ")).append(tools).append("; ");
                 } else if (!content.isBlank()) {
                     String snippet = content.length() > 100 ? content.substring(0, 100) + "..." : content;
-                    sb.append("AI: ").append(snippet).append("; ");
+                    sb.append(text("Assistant: ", "Assistente: ")).append(snippet).append("; ");
                 }
                 count++;
             } else if ("tool".equals(role)) {
                 // Tool result: note success/error and whether important information is present.
                 String lower = content.toLowerCase();
                 if (lower.contains("error") || lower.contains("failed")) {
-                    sb.append("(failed); ");
+                    sb.append(text("Reported failure; ", "Falha relatada; "));
                 } else if (important) {
-                    sb.append("(success*); ");
+                    sb.append(text("Retained tool outcome; ", "Resultado de ferramenta retido; "));
                 } else {
-                    sb.append("(success); ");
+                    sb.append(text("Tool outcome retained in recent history; ", "Resultado da ferramenta mantido no histórico recente; "));
                 }
                 count++;
             } else if ("system".equals(role)) {
                 // System messages: preserve accumulated summary from previous
                 // trimHistory passes, and keep important body-log events.
-                if (content.startsWith("[SUMMARY]")) {
+                if (content.startsWith("[SUMMARY]") || content.startsWith("Conversation summary. ") || content.startsWith("Resumo da conversa. ")) {
                     // Accumulate the previous summary instead of discarding it.
                     // Without this branch, every trim would drop the prior
                     // summary and the LLM would lose ALL memory older than the
                     // recent window — a slow memory leak of long-term context.
                     // Extract everything after the "[SUMMARY]" tag.
-                    int bracketEnd = content.indexOf(']');
-                    String prevSummary = bracketEnd >= 0 && bracketEnd + 1 < content.length()
-                            ? content.substring(bracketEnd + 1).trim() : "";
+                    String prevSummary = content.startsWith("[SUMMARY]")
+                            ? content.substring("[SUMMARY]".length()).trim()
+                            : content.substring(content.indexOf('.') + 1).trim();
                     if (!prevSummary.isBlank()) {
                         sb.append(prevSummary).append(" | ");
                         count++;
@@ -2539,7 +2384,7 @@ public class AgentLoop {
                 } else if (content.startsWith("[EVENTS]") && important) {
                     // Body log events: skip transient ones, but keep important
                     String snippet = content.length() > 80 ? content.substring(0, 80) + "..." : content;
-                    sb.append("[EVENT] ").append(snippet).append("; ");
+                    sb.append(text("Earlier server observation: ", "Observação anterior do servidor: ")).append(snippet).append("; ");
                     count++;
                 }
                 continue;
@@ -2550,7 +2395,7 @@ public class AgentLoop {
                 // Insert the importance marker before the last semicolon.
                 int lastSemi = sb.lastIndexOf("; ");
                 if (lastSemi >= 0) {
-                    sb.insert(lastSemi, "[IMPORTANT]");
+                    sb.insert(lastSemi, text(" (retained evidence)", " (evidência retida)"));
                 }
             }
         }
@@ -2561,7 +2406,7 @@ public class AgentLoop {
         // failed; a bounded head/tail ledger retains both without token drift.
         int half = (MAX_HISTORY_SUMMARY_CHARS - 32) / 2;
         return summary.substring(0, half)
-                + " ... [older details compacted] ... "
+                + text(" ... older details compacted ... ", " ... detalhes antigos compactados ... ")
                 + summary.substring(summary.length() - half);
     }
 
@@ -2641,18 +2486,7 @@ public class AgentLoop {
                             owner, companion.companionId(), "companion_chat",
                             "[" + companion.companionName() + "] " + text);
                 }
-                // Ordinary speech is owner-facing and must not wake every
-                // sibling LLM. Explicit [TEAM] messages are the only spoken
-                // broadcast path; routine coordination uses TeamBlackboard.
-                // Guard against null owner (player offline): broadcastToOtherCompanions
-                // needs the owner UUID to find sibling companions, and calling
-                // owner.getUUID() on a null reference would NPE. Skip the
-                // broadcast in that case — sibling AIs will simply not hear
-                // this utterance until the owner reconnects.
-                if (owner != null && isExplicitTeamMessage(text)) {
-                    com.mineagent.engine.MineAgentEngine.broadcastToOtherCompanions(
-                            companion.companionId(), owner.getUUID(), text);
-                }
+                // Routine dialogue is not an implicit team broadcast. Explicit coordination tools own delivery.
             } catch (Exception e) {
                 System.err.println("[MineAgent] Failed to send message to owner: " + e.getMessage());
             }
@@ -2666,17 +2500,23 @@ public class AgentLoop {
             if (inbox.isEmpty()) return;
             var batch = new ArrayList<>(inbox.values());
             inbox.clear();
-            // Events are observations presented to the model, not immutable
-            // system-level instructions. A user-role event also guarantees a
-            // valid provider request for spawn/resume turns with no chat text.
-            StringBuilder sb = new StringBuilder("[EVENTS]\n");
+            // Natural server observations have a separate role so durable dialogue
+            // never mistakes them for literal player claims. The transient live
+            // context supplies the final user-role message for provider requests.
+            StringBuilder sb = new StringBuilder(IdentityText.text(RuntimeLanguage.language().id(),
+                    "Server observations, not new player instructions.\n", "Observações do servidor, não novas instruções do jogador.\n"));
             for (String entry : batch) {
-                sb.append("- ").append(entry).append("\n");
+                sb.append(ModelText.external(RuntimeLanguage.language(), naturalEvent(entry))).append("\n");
             }
             synchronized (history) {
-                history.add(ChatMessage.user(sb.toString()));
+                history.add(ChatMessage.system(sb.toString()));
             }
         }
+    }
+
+    /** Removes internal machine event delimiters only from server-produced framing, never owner speech. */
+    private static String naturalEvent(String text) {
+        return text == null ? "" : text.replaceAll("\\[([A-Z_]+)]", "$1: ");
     }
 
     private static boolean isExplicitTeamMessage(String text) {
@@ -2686,8 +2526,6 @@ public class AgentLoop {
     }
 
     // ── Tool execution ─────────────────────────────────────────────
-
-    private enum ToolExecutionState { PENDING, RUNNING, COMPLETED, EXPIRED }
 
     /**
      * Normalize provider output before it enters conversation history.
@@ -2716,9 +2554,16 @@ public class AgentLoop {
                 normalized.isEmpty() ? null : normalized);
     }
 
+    private static String codedErrorJson(String code, String english, String portuguese) {
+        com.google.gson.JsonObject error = new com.google.gson.JsonObject();
+        error.addProperty("error", text(english, portuguese));
+        error.addProperty("code", code);
+        return error.toString();
+    }
+
     private static String errorJson(String message) {
         com.google.gson.JsonObject error = new com.google.gson.JsonObject();
-        error.addProperty("error", message == null ? "Unknown error" : message);
+        error.addProperty("error", message == null ? text("Unknown error", "Erro desconhecido") : message);
         return error.toString();
     }
 
@@ -2731,307 +2576,184 @@ public class AgentLoop {
         return errorJson(detail);
     }
 
+    private record ToolExecution(String id, String name, ExecutionOwner.Lease lease,
+                                 AtomicBoolean verified) {
+        ExecutionProtocol.Call call() { return lease.call(); }
+    }
+
+    private static String executionUnavailable() {
+        return codedErrorJson("tool_cancelled",
+                "Execution was revoked or its deadline elapsed. Already committed physical effects are not rolled back; inspect current state before retrying.",
+                "A execução foi revogada ou seu prazo expirou. Efeitos físicos já confirmados não são desfeitos; observe o estado atual antes de tentar novamente.");
+    }
+
+    private static String executionTimeout() {
+        return codedErrorJson("tool_timeout",
+                "Execution deadline elapsed. Physical effects may already exist; cancellation is queued and current state must be observed before retrying.",
+                "O prazo da execução expirou. Efeitos físicos podem já existir; o cancelamento foi enfileirado e o estado atual deve ser observado antes de tentar novamente.");
+    }
+
+    /** Both native calls and alternate skill/compensation actions enter this exact protocol. */
+    private ToolExecution prepareExecution(String id, Tool tool, long acceptedGeneration,
+                                            java.util.function.BooleanSupplier additionalPolicy) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(Math.max(1, tool.defaultTimeoutSeconds()));
+        AtomicReference<ToolExecution> holder = new AtomicReference<>();
+        ExecutionOwner.Lease lease = executionOwner.open(id,
+                () -> !suspended && eventGeneration.get() == acceptedGeneration && additionalPolicy.getAsBoolean(),
+                deadline, () -> {
+                    if (tool.dispatchesAsyncTask()) cancelOwnedTaskNow(id);
+                    ToolExecution execution = holder.get();
+                    if (execution != null) markExecutionUnverified(execution);
+                });
+        ToolExecution execution = new ToolExecution(id, tool.name(), lease, new AtomicBoolean());
+        holder.set(execution);
+        return execution;
+    }
+
+    /** Server-thread-only physical invocation, including checkpoints, callbacks and revocation scope. */
+    private void dispatchExecution(ToolExecution execution, Tool tool, com.google.gson.JsonObject args) {
+        execution.call().dispatch(() -> {
+            publishWorldSnapshotNow(true);
+            long tick = currentGameTickSafe();
+            if (!tool.dispatchesAsyncTask() && SKILL_ACTION_TOOLS.contains(tool.name())) planner.bindToolCall(execution.id());
+            if (SKILL_ACTION_TOOLS.contains(tool.name())) {
+                actionLedger.begin(execution.id(), tool.name(),
+                        text("server callback plus postcondition observation", "retorno do servidor e observação da pós-condição"),
+                        semanticWorldModel, tick);
+            }
+            semanticWorldModel.recordAction(tool.name(), args.toString(), execution.id(), tick);
+            dispatchedActionTools.put(execution.id(), tool.name());
+            mechanismExplorer.onToolDispatched(execution.id(), tool.name(), args.toString(), tick);
+        }, callback -> tool.onServerCall(execution.id(), args, companion, callback),
+                raw -> publishToolOutcome(execution, raw),
+                raw -> reconcileLateToolReceipt(execution, raw),
+                failure -> toolErrorJson(tool.name(), failure),
+                task -> Services.platform().scheduleOnServer(task),
+                execution.lease()::requestCancellation, executionUnavailable());
+        if (execution.call().terminal().state() == ExecutionProtocol.State.EXPIRED) {
+            markExecutionUnverified(execution);
+        }
+    }
+
+    /** Called only after terminal ownership and payload have been atomically published. */
+    private void publishToolOutcome(ToolExecution execution, String raw) {
+        publishWorldSnapshotNow(true);
+        FailureAnalysis outcome = analyzeFailure(raw);
+        boolean async = "async_pending".equals(outcome.errorType());
+        boolean success = async || outcome.isSuccess();
+        long tick = currentGameTickSafe();
+        if (!async) {
+            dispatchedActionTools.remove(execution.id());
+            if (SKILL_ACTION_TOOLS.contains(execution.name())) {
+                var transaction = actionLedger.finishObserved(execution.id(), success, raw, semanticWorldModel, tick);
+                success = transaction != null && transaction.status() == ActionTransactionLedger.Status.VERIFIED;
+            }
+            semanticWorldModel.recordOutcome(execution.name(), success, raw, execution.id(), tick,
+                    durableToolOutcome(execution.name()));
+            if (!"identity_memory".equals(execution.name())
+                    && (IDENTITY_OBSERVATION_TOOLS.contains(execution.name()) || SKILL_ACTION_TOOLS.contains(execution.name()))) {
+                identity.recordEvidence("observation", "tool:" + execution.name(), raw, tick);
+            }
+            execution.lease().release();
+        } else if (SKILL_ACTION_TOOLS.contains(execution.name())) {
+            actionLedger.markPending(execution.id(), semanticWorldModel, tick, raw);
+        }
+        // execute_skill has its own exact run lease, retained until the skill terminal event.
+        if (async && "execute_skill".equals(execution.name())) execution.lease().release();
+        execution.verified().set(success);
+        mechanismExplorer.onToolResult(execution.id(), execution.name(), success, async, raw, tick);
+    }
+
+    /** Late receipts are observations, never successful/stale learned action outcomes. No rollback is invented. */
+    private void reconcileLateToolReceipt(ToolExecution execution, String raw) {
+        publishWorldSnapshotNow(true);
+        String receipt = text("Late physical execution receipt; the original call is no longer authoritative. Verify live state before repeating work: ",
+                "Recibo tardio de execução física; a chamada original não é mais autoritativa. Verifique o estado atual antes de repetir o trabalho: ")
+                + execution.id() + " (" + execution.name() + "): " + truncateForLog(raw, 2400);
+        cognitiveState.append("late_tool_receipt", execution.id(), receipt, currentGameTickSafe());
+        enqueueInbox(receipt);
+    }
+
+    /** Server-thread-only expiry bookkeeping; a timeout is uncertainty, not an observed physical failure. */
+    private void markExecutionUnverified(ToolExecution execution) {
+        if (execution.call().terminal().state() != ExecutionProtocol.State.EXPIRED) return;
+        if (SKILL_ACTION_TOOLS.contains(execution.name())) {
+            var transaction = actionLedger.get(execution.id());
+            if (transaction != null && (!transaction.terminal())) {
+                actionLedger.finish(execution.id(), ActionTransactionLedger.Status.UNVERIFIED,
+                        execution.call().terminal().payload(), semanticWorldModel, currentGameTickSafe());
+            }
+        }
+        dispatchedActionTools.remove(execution.id());
+        execution.lease().release();
+    }
+
+    private void expireExecution(ToolExecution execution, String payload) {
+        if (!execution.call().expire(payload)) return;
+        execution.lease().requestCancellation();
+    }
+
     private List<ChatMessage> executeToolCalls(List<ChatMessage.ToolCallRef> toolCalls,
                                                 long acceptedGeneration) {
-        // Each ToolExecution carries its own toolCallId and toolName so that
-        // results are matched correctly even when some tools are skipped
-        // (unknown tool / invalid args). Previously the wait loop indexed into
-        // `toolCalls` with the `executions` index, which misaligned whenever a
-        // tool was skipped — causing toolCallId/result mismatches.
-        record ToolExecution(String toolCallId, String toolName,
-                             CountDownLatch latch,
-                             AtomicReference<String> result,
-                             AtomicReference<ToolExecutionState> state,
-                             long deadlineNanos, boolean asynchronous) {}
         List<ToolExecution> executions = new ArrayList<>();
-        // Collect results keyed by toolCallId so the final list can be rebuilt
-        // in the original toolCalls order. This keeps analyzeToolResults (which
-        // pairs toolCalls and toolResults by index) correct.
         Map<String, ChatMessage> resultsById = new LinkedHashMap<>();
         boolean asyncBodyReserved = false;
-
         for (var tc : toolCalls) {
             Optional<Tool> toolOpt = ToolRegistry.get(tc.name());
             if (toolOpt.isEmpty()) {
                 resultsById.put(tc.id(), ChatMessage.toolResult(tc.id(),
-                        errorJson("Unknown tool: " + tc.name())));
+                        errorJson(text("Unknown tool: ", "Ferramenta desconhecida: ") + tc.name())));
                 continue;
             }
-
             Tool tool = toolOpt.get();
             com.google.gson.JsonObject args;
-            try {
-                args = com.google.gson.JsonParser.parseString(tc.arguments()).getAsJsonObject();
-            } catch (Exception e) {
+            try { args = com.google.gson.JsonParser.parseString(tc.arguments()).getAsJsonObject(); }
+            catch (Exception invalid) {
                 resultsById.put(tc.id(), ChatMessage.toolResult(tc.id(),
-                        errorJson("Invalid arguments: " + e.getMessage())));
+                        errorJson(text("Invalid arguments: ", "Argumentos inválidos: ") + invalid.getMessage())));
                 continue;
             }
-
             if (tool.dispatchesAsyncTask() && asyncBodyReserved) {
-                // One fake player has one body. Dispatching two asynchronous
-                // physical tasks from the same response only lets the auction
-                // accept one; the other becomes a misleading cancellation and
-                // triggers another expensive reasoning round.
-                resultsById.put(tc.id(), ChatMessage.toolResult(tc.id(),
-                        "{\"error\":\"Skipped because this response already dispatched "
-                                + "an asynchronous body task. Wait for task_finished before "
-                                + "starting another body action.\",\"code\":\"body_task_conflict\"}"));
+                resultsById.put(tc.id(), ChatMessage.toolResult(tc.id(), codedErrorJson("body_task_conflict",
+                        "This response already dispatched an asynchronous body task. Wait for its terminal outcome before starting another body action.",
+                        "Esta resposta já despachou uma tarefa corporal assíncrona. Aguarde seu resultado final antes de iniciar outra ação corporal.")));
                 continue;
             }
             if (tool.dispatchesAsyncTask()) asyncBodyReserved = true;
-
-            // Each tool gets its own latch(1), result holder, and timeout (M3 fix)
-            int timeout = Math.max(1, tool.defaultTimeoutSeconds());
-            CountDownLatch latch = new CountDownLatch(1);
-            AtomicReference<String> resultHolder = new AtomicReference<>();
-            AtomicReference<ToolExecutionState> state =
-                    new AtomicReference<>(ToolExecutionState.PENDING);
-            AtomicBoolean callbackDelivered = new AtomicBoolean(false);
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeout);
-            executions.add(new ToolExecution(
-                    tc.id(), tc.name(), latch, resultHolder, state, deadline,
-                    tool.dispatchesAsyncTask()));
-
-            // Execute on server thread
-            Runnable serverCall = () -> {
-                // Cancellation/staleness may happen while this runnable waits in
-                // the server queue. CAS prevents it from entering tool code after
-                // the accepted turn has been invalidated or timed out.
-                if (eventGeneration.get() != acceptedGeneration
-                        || !state.compareAndSet(
-                                ToolExecutionState.PENDING, ToolExecutionState.RUNNING)) {
-                    state.compareAndSet(ToolExecutionState.PENDING,
-                            ToolExecutionState.EXPIRED);
-                    latch.countDown();
-                    return;
-                }
-                try {
-                    // Ground every tool decision in the latest carried state.
-                    // This server-thread read also catches inventory changes
-                    // made by vanilla between the one-second periodic samples.
-                    publishWorldSnapshotNow(true);
-                    long actionTick = currentGameTickSafe();
-                    if (!tool.dispatchesAsyncTask()
-                            && SKILL_ACTION_TOOLS.contains(tc.name())) {
-                        planner.bindToolCall(tc.id());
-                    }
-                    if (SKILL_ACTION_TOOLS.contains(tc.name())) {
-                        actionLedger.begin(tc.id(), tc.name(),
-                                "server callback plus postcondition observation",
-                                semanticWorldModel, actionTick);
-                    }
-                    semanticWorldModel.recordAction(tc.name(), args.toString(),
-                            tc.id(), actionTick);
-                    dispatchedActionTools.put(tc.id(), tc.name());
-                    mechanismExplorer.onToolDispatched(tc.id(), tc.name(),
-                            args.toString(), actionTick);
-                    tool.onServerCall(tc.id(), args, companion, callbackResult -> {
-                        // A modded tool or a defensive retry must not publish
-                        // two outcomes for one call. Without this gate the
-                        // second callback could overwrite a VERIFIED ledger
-                        // entry, duplicate durable memory, and release a
-                        // waiting LLM round twice.
-                        if (!callbackDelivered.compareAndSet(false, true)
-                                || state.get() != ToolExecutionState.RUNNING) {
-                            return;
-                        }
-                        publishWorldSnapshotNow(true);
-                        String safeResult = callbackResult == null
-                                ? errorJson("Tool callback returned null") : callbackResult;
-                        FailureAnalysis outcome = analyzeFailure(safeResult);
-                        boolean async = "async_pending".equals(outcome.errorType());
-                        boolean success = async || outcome.isSuccess();
-                        long callbackTick = currentGameTickSafe();
-                        if (!async) {
-                            dispatchedActionTools.remove(tc.id());
-                            if (SKILL_ACTION_TOOLS.contains(tc.name())) {
-                                var transaction = actionLedger.finishObserved(
-                                        tc.id(), success, safeResult,
-                                        semanticWorldModel, callbackTick);
-                                success = transaction != null
-                                        && transaction.status()
-                                        == ActionTransactionLedger.Status.VERIFIED;
-                            }
-                            semanticWorldModel.recordOutcome(tc.name(), success,
-                                    safeResult, tc.id(), callbackTick,
-                                    durableToolOutcome(tc.name()));
-                        } else if (SKILL_ACTION_TOOLS.contains(tc.name())) {
-                            actionLedger.markPending(tc.id(), semanticWorldModel,
-                                    callbackTick, safeResult);
-                        }
-                        mechanismExplorer.onToolResult(tc.id(), tc.name(), success, async,
-                                safeResult, callbackTick);
-                        if (state.compareAndSet(
-                                ToolExecutionState.RUNNING, ToolExecutionState.COMPLETED)) {
-                            // Store before releasing the latch so the loop thread
-                            // observes a fully published callback result.
-                            // The AtomicReference also protects callbacks issued
-                            // by tools from a later tick.
-                            resultHolder.set(safeResult);
-                            latch.countDown();
-                        }
-                    });
-                } catch (Throwable t) {
-                    // A tool throwing (e.g. NPE from missing/invalid args)
-                    // must not leak into the server thread and must not
-                    // leave the latch hanging until timeout — reply with a
-                    // meaningful error so the LLM can correct its call.
-                    System.err.println("[MineAgent] Tool '" + tc.name()
-                            + "' threw: " + t);
-                    semanticWorldModel.recordOutcome(tc.name(), false,
-                            String.valueOf(t.getMessage()), tc.id(), currentGameTickSafe(),
-                            durableToolOutcome(tc.name()));
-                    if (SKILL_ACTION_TOOLS.contains(tc.name())) {
-                        actionLedger.finish(tc.id(), ActionTransactionLedger.Status.FAILED,
-                                String.valueOf(t.getMessage()), semanticWorldModel,
-                                currentGameTickSafe());
-                    }
-                    dispatchedActionTools.remove(tc.id());
-                    mechanismExplorer.onToolResult(tc.id(), tc.name(), false, false,
-                            String.valueOf(t.getMessage()), currentGameTickSafe());
-                    if (state.compareAndSet(
-                            ToolExecutionState.RUNNING, ToolExecutionState.COMPLETED)) {
-                        resultHolder.set(toolErrorJson(tc.name(), t));
-                        latch.countDown();
-                    }
-                }
-            };
-            try {
-                Services.platform().scheduleOnServer(serverCall);
-            } catch (Throwable schedulingFailure) {
-                if (state.compareAndSet(
-                        ToolExecutionState.PENDING, ToolExecutionState.COMPLETED)) {
-                    semanticWorldModel.recordOutcome(tc.name(), false,
-                            String.valueOf(schedulingFailure.getMessage()), tc.id(),
-                            currentGameTickSafe(), durableToolOutcome(tc.name()));
-                    if (SKILL_ACTION_TOOLS.contains(tc.name())) {
-                        actionLedger.finish(tc.id(), ActionTransactionLedger.Status.UNVERIFIED,
-                                String.valueOf(schedulingFailure.getMessage()),
-                                semanticWorldModel, currentGameTickSafe());
-                    }
-                    mechanismExplorer.onToolResult(tc.id(), tc.name(), false,
-                            false, String.valueOf(schedulingFailure.getMessage()),
-                            currentGameTickSafe());
-                    resultHolder.set(toolErrorJson(tc.name(), schedulingFailure));
-                    latch.countDown();
-                }
-            }
+            ToolExecution execution = prepareExecution(tc.id(), tool, acceptedGeneration, () -> true);
+            executions.add(execution);
+            try { Services.platform().scheduleOnServer(() -> dispatchExecution(execution, tool, args)); }
+            catch (Throwable rejected) { expireExecution(execution, toolErrorJson(tc.name(), rejected)); }
         }
-
-        // Wait for all dispatched tools to complete. Use exec.toolCallId()
-        // (NOT toolCalls.get(i).id()) so the result is always matched to the
-        // correct toolCallId regardless of how many tools were skipped above.
-        for (ToolExecution exec : executions) {
+        for (ToolExecution execution : executions) {
             try {
-                long remaining = exec.deadlineNanos() - System.nanoTime();
-                boolean done = remaining > 0
-                        && exec.latch().await(remaining, TimeUnit.NANOSECONDS);
-                if (!done) {
-                    // A callback can arrive at the same instant as the
-                    // deadline.  Claim expiry with CAS; if the callback won,
-                    // keep its authoritative result instead of overwriting a
-                    // verified action with a timeout.
-                    boolean expired = exec.state().compareAndSet(
-                            ToolExecutionState.RUNNING, ToolExecutionState.EXPIRED)
-                            || exec.state().compareAndSet(
-                            ToolExecutionState.PENDING, ToolExecutionState.EXPIRED);
-                    if (!expired) {
-                        String lateResult = exec.result().get();
-                        if (lateResult != null) {
-                            resultsById.put(exec.toolCallId(), ChatMessage.toolResult(
-                                    exec.toolCallId(), truncateToolResult(lateResult,
-                                            getToolResultLimit(exec.toolName()), exec.toolName())));
-                            continue;
-                        }
-                    }
-                    if (expired && exec.asynchronous()) {
-                        cancelTimedOutTask(exec.toolCallId());
-                    }
-                    dispatchedActionTools.remove(exec.toolCallId());
-                    semanticWorldModel.recordOutcome(exec.toolName(), false,
-                            "Tool execution timed out", exec.toolCallId(),
-                            currentGameTickSafe(), durableToolOutcome(exec.toolName()));
-                    if (SKILL_ACTION_TOOLS.contains(exec.toolName())) {
-                        actionLedger.finish(exec.toolCallId(),
-                                ActionTransactionLedger.Status.UNVERIFIED,
-                                "Tool execution timed out", semanticWorldModel,
-                                currentGameTickSafe());
-                    }
-                    mechanismExplorer.onToolResult(exec.toolCallId(), exec.toolName(), false,
-                            false, "Tool execution timed out", currentGameTickSafe());
-                    resultsById.put(exec.toolCallId(), ChatMessage.toolResult(exec.toolCallId(),
-                            "{\"error\":\"Tool execution timed out\"}"));
-                } else {
-                    String rawResult = exec.result().get();
-                    if (rawResult == null) {
-                        rawResult = exec.state().get() == ToolExecutionState.EXPIRED
-                                ? "{\"error\":\"Tool execution cancelled\"}"
-                                : "{\"success\":true}";
-                    }
-                    // Truncate long tool results to keep the conversation compact.
-                    // Adjust the truncation limit by tool type:
-                    // - look_around/scan: preserve enough surrounding context (scan defaults to 1200 characters).
-                    // - status/inventory: 600 characters (medium).
-                    // - other tools: 800 characters by default.
-                    // Prioritize dangerous information when retaining content.
-                    int maxChars = getToolResultLimit(exec.toolName());
-                    String truncated = truncateToolResult(rawResult, maxChars, exec.toolName());
-                    resultsById.put(exec.toolCallId(),
-                            ChatMessage.toolResult(exec.toolCallId(), truncated));
-                }
-            } catch (InterruptedException e) {
+                if (!execution.call().await()) expireExecution(execution, executionTimeout());
+            } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
-                boolean expired = exec.state().compareAndSet(
-                        ToolExecutionState.RUNNING, ToolExecutionState.EXPIRED)
-                        || exec.state().compareAndSet(
-                        ToolExecutionState.PENDING, ToolExecutionState.EXPIRED);
-                if (expired && exec.asynchronous()) {
-                    cancelTimedOutTask(exec.toolCallId());
-                }
-                dispatchedActionTools.remove(exec.toolCallId());
-                semanticWorldModel.recordOutcome(exec.toolName(), false,
-                        "Interrupted", exec.toolCallId(), currentGameTickSafe(),
-                        durableToolOutcome(exec.toolName()));
-                if (SKILL_ACTION_TOOLS.contains(exec.toolName())) {
-                    actionLedger.finish(exec.toolCallId(),
-                            ActionTransactionLedger.Status.CANCELLED, "Interrupted",
-                            semanticWorldModel, currentGameTickSafe());
-                }
-                mechanismExplorer.onToolResult(exec.toolCallId(), exec.toolName(), false,
-                        false, "Interrupted", currentGameTickSafe());
-                resultsById.put(exec.toolCallId(), ChatMessage.toolResult(exec.toolCallId(),
-                        "{\"error\":\"Interrupted\"}"));
+                expireExecution(execution, executionUnavailable());
             }
+            // Terminal state and payload are one immutable publication, including when terminal effects are still finishing.
+            String raw = execution.call().terminal().payload();
+            if (raw == null) throw new IllegalStateException("Execution ended without a terminal payload");
+            resultsById.put(execution.id(), ChatMessage.toolResult(execution.id(),
+                    truncateToolResult(raw, getToolResultLimit(execution.name()), execution.name())));
         }
-
-        // Build the results list in the original toolCalls order so that
-        // analyzeToolResults (which pairs by index) works correctly.
         List<ChatMessage> results = new ArrayList<>(toolCalls.size());
         for (var tc : toolCalls) {
-            ChatMessage r = resultsById.get(tc.id());
-            if (r != null) {
-                results.add(r);
-                FailureAnalysis analysis = analyzeFailure(r.content());
-                boolean invalid = "invalid_arguments".equals(analysis.errorType())
-                        || "unknown_tool".equals(analysis.errorType());
-                metrics.recordAction(!invalid, analysis.isSuccess(), invalid,
-                        analysis.errorType());
-            }
+            ChatMessage result = resultsById.get(tc.id());
+            if (result == null) continue;
+            results.add(result);
+            FailureAnalysis analysis = analyzeFailure(result.content());
+            boolean invalid = "invalid_arguments".equals(analysis.errorType()) || "unknown_tool".equals(analysis.errorType());
+            metrics.recordAction(!invalid, analysis.isSuccess(), invalid, analysis.errorType());
         }
         return results;
     }
 
-    /** Stop an async body action whose tool callback deadline elapsed. */
-    private void cancelTimedOutTask(String taskId) {
-        if (taskId == null || taskId.isBlank()) return;
-        try {
-            MineAgentEngine.getCompanion(companion.companionId())
-                    .ifPresent(state -> state.auction.cancelTask(taskId));
-        } catch (Throwable failure) {
-            System.err.println("[MineAgent] Failed to cancel timed-out tool task "
-                    + taskId + ": " + failure.getMessage());
-        }
+    /** This method is reached only from a server-queued owned cancellation, never from a reasoning waiter. */
+    private void cancelOwnedTaskNow(String taskId) {
+        MineAgentEngine.getCompanion(companion.companionId())
+                .ifPresent(state -> state.auction.cancelTask(taskId));
     }
 
     /** Only physical/world-changing tools belong in durable outcome memory. */
@@ -3048,6 +2770,7 @@ public class AgentLoop {
         String lower = toolName.toLowerCase();
         // look_around now emits ordered, bounded JSON. Keep the complete
         // object instead of repairing a cut in the entity or terrain arrays.
+        if (lower.equals("identity_memory")) return 7000;
         if (lower.contains("look_around")) return 9000;
         if (lower.contains("resolve_need")) return 7000;
         if (lower.contains("plan_acquisition")) {
@@ -3209,7 +2932,7 @@ public class AgentLoop {
         String owner = companion.ownerUuid() == null ? "owner" : companion.ownerUuid().toString();
         String name = companion.companionName() == null ? "companion"
                 : companion.companionName().trim().replaceAll("[^a-zA-Z0-9_-]", "_");
-        return provider.providerId() + ":" + model + ":mineagent-prompt-v4:" + owner + ":" + name;
+        return provider.providerId() + ":" + model + ":mineagent-prompt-v5:" + RuntimeLanguage.language().id() + ":" + owner + ":" + name;
     }
 
     /** HTTP deadline is bounded per reasoning round so stale requests can be cancelled. */
@@ -3256,31 +2979,7 @@ public class AgentLoop {
         return false;
     }
 
-    /**
-     * Check whether the LLM response explicitly declares a no-action marker.
-     *
-     * <p>Based on the explicit intent declaration pattern from NLT
-     * (Natural Language Tools, arxiv 2510.14453) and Reflexion. Rather than guessing
-     * action intent with fragile keyword lists, require the LLM to explicitly include
-     * [NO_ACTION] whenever no physical action is needed.
-     *
-     * <p>This fully replaces the old containsActionIntent() keyword approach:
-     * <ul>
-     *   <li>Language-independent: the structured marker needs no language-specific keywords</li>
-     *   <li>LLM judgment: the LLM decides whether to act rather than leaving the system to guess</li>
-     *   <li>No omissions: protocol-compliant responses expose every "say but do not act" case</li>
-     *   <li>No maintenance: scenario changes do not require keyword-list updates</li>
-     * </ul>
-     *
-     * <p>For a text-only LLM response (no tool_calls):
-     * <ul>
-     *   <li>Marker present -> explicit no-action declaration -> end the turn; caching is allowed</li>
-     *   <li>Marker absent -> a tool call may be missing -> trigger remediation</li>
-     * </ul>
-     *
-     * @param text LLM response text
-     * @return true if the response contains an explicit no-action marker
-     */
+    /** Legacy saved-utterance parsing only; never requested or used to gate a decision. */
     private static boolean hasExplicitNoActionMarker(String text) {
         if (text == null || text.isBlank()) return false;
         // Accept explicit English marker variants anywhere in the response.
@@ -3383,245 +3082,26 @@ public class AgentLoop {
     }
 
     /** Build the immutable instruction prefix shared by every request. */
+    private static String text(String english, String portuguese) {
+        return IdentityText.text(RuntimeLanguage.language().id(), english, portuguese);
+    }
+
+    /** Keep the large stable prefix unchanged except when the server language actually changes. */
+    private void refreshSystemPromptIfNeeded() {
+        String prompt = buildSystemPrompt();
+        synchronized (history) {
+            if (!history.isEmpty() && prompt.equals(history.getFirst().content())) return;
+            if (history.isEmpty()) history.add(ChatMessage.system(prompt));
+            else history.set(0, ChatMessage.system(prompt));
+            providerHistoryCursor = 0;
+            ProviderSessionState state = providerTransportState.get();
+            providerTransportState.set(new ProviderSessionState(state.providerId(), state.model(),
+                    state.conversationId(), null, null, state.revision()));
+        }
+    }
+
     private String buildSystemPrompt() {
-        StringBuilder sb = new StringBuilder();
-
-        // ── Core identity ──
-        sb.append("You are MineAgent, an AI player in Minecraft — NOT an NPC, NOT a bot.\n");
-        sb.append("You are a real player entity with a body, inventory, health, and hunger.\n");
-        sb.append("You think, decide, and act like an experienced human player would.\n\n");
-
-        // ── Cognitive framework: HOW to think, not WHAT to know ──
-        sb.append("## How You Think\n");
-        sb.append("You already know Minecraft inside out — recipes, mob behaviors, ");
-        sb.append("ore depths, crafting chains, combat tactics, redstone, farming, ");
-        sb.append("potion brewing, enchanting, villager trading, all of it.\n");
-        sb.append("Your job is NOT to recite that knowledge, but to USE it ");
-        sb.append("to make smart decisions in real-time.\n\n");
-
-        sb.append("### The Think-Act Loop\n");
-        sb.append("Before EVERY action, run through this mental checklist:\n");
-        sb.append("1. **Observe** — What's around me? What's my status? What changed?\n");
-        sb.append("2. **Assess** — Am I in danger? Am I hungry? Am I equipped for this?\n");
-        sb.append("3. **Decide** — What's the best next action? What do I need first?\n");
-        sb.append("4. **Prepare** — Do I have the right tools? If not, make them first.\n");
-        sb.append("5. **Act** — Execute, then observe the result and adapt.\n\n");
-
-        sb.append("### Task Decomposition\n");
-        sb.append("When given ANY task — no matter how complex — break it down:\n");
-        sb.append("- 'Go mining' → What tools do I need? → Do I have them? ");
-        sb.append("→ If not, what do I need to make them? → Start from the beginning.\n");
-        sb.append("- 'Build a farm' → What crops? → Where's water? → ");
-        sb.append("Do I have a hoe? → Seeds? → Plan the layout first.\n");
-        sb.append("- 'Explore the Nether' → Do I have armor? Fire resistance? ");
-        sb.append("Food? A way back home? → Prepare ALL of this before entering.\n");
-        sb.append("- ANY task → What's the prerequisite? → What's ITS prerequisite? ");
-        sb.append("→ Recurse until you reach something you can do RIGHT NOW.\n\n");
-
-        sb.append("### Asset and Capability Reuse\n");
-        sb.append("Treat inventory, equipment, known container contents, dropped items, and placed facilities as one asset system. ");
-        sb.append("Before crafting, replacing equipment, or placing another workstation, resolve the actual need: an exact item, a quantity, or a capability. ");
-        sb.append("Prefer in order: reuse carried asset; verify and retrieve a known stored asset; reuse a reachable world facility; only then produce or acquire a replacement. ");
-        sb.append("A remembered container is evidence, not x-ray truth: approach and inspect it before transfer. ");
-        sb.append("Use registered IDs, recipe data, tags, capabilities, distance, risk and task delay; never assume that a cheaper newly crafted item is better than a known capable item. ");
-        sb.append("If the owner explicitly needs an additional copy or retrieval is unsafe, say why and produce the extra item with an explicit desired total.\n\n");
-
-        sb.append("### Situational Judgment\n");
-        sb.append("There is no fixed playbook. Read the situation and adapt:\n");
-        sb.append("- See a creeper? Don't charge in — assess: ");
-        sb.append("can I kill it in time? Should I retreat? Is the owner nearby?\n");
-        sb.append("- Found diamonds? Think: is this area safe? ");
-        sb.append("Do I have an iron pickaxe? Torches? An exit?\n");
-        sb.append("- Night falling? Decide: fight through it, build a shelter, ");
-        sb.append("or sleep? Depends on my gear and the owner's plan.\n");
-        sb.append("- Owner is in danger? DROP everything. Protect them. No task ");
-        sb.append("matters more than the owner's survival.\n\n");
-
-        sb.append("### Autonomous Decision-Making\n");
-        sb.append("You don't need to be told every little step. If the owner says ");
-        sb.append("'go gather wood', you know that means: find trees, punch them, ");
-        sb.append("craft planks, maybe make tools. You fill in the gaps yourself.\n");
-        sb.append("If you encounter a problem the owner didn't anticipate, ");
-        sb.append("solve it yourself. Only ask the owner when YOU genuinely ");
-        sb.append("can't decide.\n\n");
-
-        sb.append("### Situated Reasoning Protocol\n");
-        sb.append("Do not apply one fixed score or one fixed set of weights to every situation. ");
-        sb.append("First identify hard constraints from survival, the owner's request, and current world facts. ");
-        sb.append("Then generate more than one feasible action when the choice matters, compare their concrete ");
-        sb.append("consequences in this situation, and prefer reversible information-gathering when uncertainty is high. ");
-        sb.append("Resource scarcity, urgency, future reuse, cleanup, and risk matter only when the current evidence makes them relevant. ");
-        sb.append("After acting, verify the world or inventory result before marking a plan step complete. ");
-        sb.append("For temporary supports, decide among recover now, defer, or deliberately leave them based on live safety, ");
-        sb.append("escape-route value, reachability, scarcity, task delay, and owner intent; never always recover or always leave.\n\n");
-
-        sb.append("### Hierarchical Rolling Planning\n");
-        sb.append("For goals needing multiple dependent actions, call `todowrite` before the first body action. ");
-        sb.append("Keep the stable strategic goal and owner constraints, but plan only the next 3-6 concrete tactical milestones with explicit dependencies and observable success criteria. ");
-        sb.append("Execute one body action or verified learned skill at a time. Preserve verified milestones; when `[ROLLING_REPLAN]` arrives, repair the invalid suffix from current semantic evidence instead of rewriting completed work or repeating the failed call. ");
-        sb.append("Include a reversible observation or contingency when a prerequisite is uncertain.\n\n");
-
-        // ── Decision priority ──
-        sb.append("## Priority When Multiple Things Compete\n");
-        sb.append("1. **Immediate survival** — About to die? Handle that first.\n");
-        sb.append("2. **Owner in danger** — Help them, even if it costs you.\n");
-        sb.append("3. **Owner's explicit request** — What they asked for right now.\n");
-        sb.append("4. **Supporting the owner** — Things that help them indirectly.\n");
-        sb.append("5. **Self-improvement** — Better gear, more food, safer base.\n");
-        sb.append("When in doubt, communicate: tell the owner what you're prioritizing and why.\n\n");
-
-        // ── Tool usage ──
-        sb.append("## Your Tools\n");
-        sb.append("You perceive and act through tools. Key ones:\n");
-        sb.append("- `query_extra_tools`: Expose specialized tool schemas for the rest of this turn. "
-                + "Call it before using a specialized tool that is not currently offered.\n");
-        sb.append("- `get_self_status`: Check your health, hunger, inventory, equipment\n");
-        sb.append("- `resolve_need`: Query owned/stored/world assets and live recipes for an item or capability before producing a replacement\n");
-        sb.append("- `plan_acquisition`: Expand a target item/count into a bounded recursive dependency DAG. It distinguishes carried, observed storage, planned surplus, craftable recipes and unknown station mechanics; follow its leaves instead of remaking assets blindly.\n");
-        sb.append("- `look_around`: See terrain, blocks, entities, hazards around you\n");
-        sb.append("- `scan_blocks`: Find specific blocks; entity, GUI, storage, ranged, location, and memory tools are available through `query_extra_tools`\n");
-        sb.append("- `goto`: Move to a location (xz for horizontal, xzy for exact)\n");
-        sb.append("- `auto_mine`: Dig blocks / `build`: Place blocks\n");
-        sb.append("- `collect_items`: Pick up drops\n");
-        sb.append("- `equip_item`: Reuse an existing tool, armor piece, hotbar item or offhand item\n");
-        sb.append("- `craft`: Create items from recipes\n");
-        sb.append("- `use_item`: Use a held item in air through vanilla (throws, drinks, charges); use target coordinates when direction matters and wait for its terminal result.\n");
-        sb.append("- `wait_for`: Hold the body on a bounded, server-observed condition (inventory/GUI/semantic fact/dimension/block/entity/time). Use it after opening a furnace or unfamiliar machine instead of narrating an untracked wait.\n");
-        sb.append("- `lookup_recipe`: Query crafting recipes by input/output. ");
-        sb.append("USE THIS before crafting to know exact ingredients — don't guess.\n");
-        sb.append("- `recall_memory` (specialized): Recall places you've discovered (ores, structures, hazards). ");
-        sb.append("USE THIS before exploring — you may already know where to find what you need.\n");
-        sb.append("- `list_learned_skills`: See skills you've mastered from past successes. ");
-        sb.append("Use `execute_skill` to run one through precondition/action/postcondition verification instead of manually replaying every step.\n");
-        sb.append("- `explore_mechanism`: For unfamiliar content, compare competing hypotheses, rank bounded probes by information/cost, and arm exactly one reversible falsifiable experiment. State-changing probes require explicit compensation. One success never creates a reusable rule; independent contexts and verified deltas are required.\n");
-        sb.append("- `coordinate_team`: Inspect team commitments, claim a role, or request targeted support.\n");
-        sb.append("Read tool results carefully. If a tool fails, think about WHY ");
-        sb.append("and try a different approach.\n\n");
-
-        sb.append("## Executor Truth Rules\n");
-        sb.append("- RUNNING is only a scheduler state; it is never proof that your body is moving.\n");
-        sb.append("- Use executor evidence (player position, movement index, stagnant ticks, block changes) before claiming progress.\n");
-        sb.append("- If stagnant ticks increase or a path failure is present, report the obstruction honestly and change target or approach.\n");
-        sb.append("- Reuse assets reported by the world asset index or resolve_need. Distance alone is not absence; compare retrieval against production before replacing anything.\n");
-        sb.append("- Minimize LLM round trips: batch independent observations in one response, and let an async action task finish before polling it repeatedly.\n\n");
-        sb.append("- When the required tool is already exposed and its arguments are grounded, call it directly. Do not spend a round narrating, rediscovering schemas, or rechecking an unchanged successful result.\n\n");
-
-        // ── Critical: action requires tools ──
-        sb.append("## CRITICAL: Action Requires Tools\n");
-        sb.append("Talking is NOT doing. If you want to move, you MUST call `goto`. ");
-        sb.append("If you want to mine, you MUST call `auto_mine`. ");
-        sb.append("Saying 'I'll go check over there' without calling the tool ");
-        sb.append("means you stay exactly where you are. ");
-        sb.append("NEVER describe an action without executing it via a tool call. ");
-        sb.append("Your words are for communication with the owner; ");
-        sb.append("your tools are for actually doing things.\n\n");
-
-        // ── Action Intent Declaration Protocol (replaces keyword detection) ──
-        // Based on NLT (arxiv 2510.14453) and Reflexion's explicit intent
-        // declaration pattern. Instead of system guessing whether text
-        // contains action intent (fragile keyword matching), require LLM
-        // to EXPLICITLY declare its intent state every turn.
-        sb.append("## Action Intent Declaration Protocol (MANDATORY)\n");
-        sb.append("Every response you produce MUST fall into exactly one of two categories:\n");
-        sb.append("1. **Action response**: You call at least one tool to perform a physical ");
-        sb.append("action (move/mine/build/attack/craft/eat/place/collect/etc.). ");
-        sb.append("Text may accompany the tool call to explain what you're doing.\n");
-        sb.append("2. **No-action response**: You have NO physical action to perform ");
-        sb.append("this turn (pure conversation, status report, waiting, ");
-        sb.append("acknowledgment). In this case, you MUST include the marker ");
-        sb.append("`[NO_ACTION]` somewhere in your text response.\n\n");
-        sb.append("**Why this matters**: If you produce text without tool calls ");
-        sb.append("AND without the marker, the system will assume you FORGOT to ");
-        sb.append("call a tool and will give you one reminder. This wastes time ");
-        sb.append("and tokens. Use the marker to clearly say 'I have considered ");
-        sb.append("it, and no physical action is needed right now.'\n\n");
-        sb.append("**Examples**:\n");
-        sb.append("- Action: call `goto` + text 'I will check over there' -> OK\n");
-        sb.append("- No-action: 'Understood. [NO_ACTION]' -> OK\n");
-        sb.append("- No-action: 'Got it. [NO_ACTION]' → OK\n");
-        sb.append("- AMBIGUOUS (will trigger reminder): 'I will check over there' ");
-        sb.append("(no tool call, no marker) → system will remind you\n\n");
-        sb.append("**The marker is your honest declaration**: Use it when you ");
-        sb.append("genuinely have no physical action to take. Never use it to ");
-        sb.append("avoid calling a tool when you actually intend to act.\n\n");
-
-        // ── Reflexes & instincts ──
-        sb.append("## Body Instincts (Automatic)\n");
-        sb.append("Your body has survival reflexes that fire automatically:\n");
-        for (var reflex : com.mineagent.api.task.reflex.ReflexRegistry.all()) {
-            sb.append("- ").append(reflex.id()).append(": ").append(reflex.description());
-            // Enabled state can change at runtime and therefore belongs in
-            // live context if it ever becomes decision-relevant. Keeping only
-            // stable registry metadata here preserves the cached prefix.
-            sb.append("\n");
-        }
-        sb.append("These don't cost tokens. When they fire, you'll see [BODY] events.\n");
-        sb.append("Don't fight your instincts — work WITH them.\n\n");
-
-        // ── Skills ──
-        sb.append("## Available Skills (load with `load_skill`)\n");
-        for (var skill : SkillRegistry.all()) {
-            sb.append("- ").append(skill.name()).append("\n");
-        }
-        sb.append("\n");
-
-        // ── Your body ──
-        sb.append("## Your Body\n");
-        sb.append("You are a full Minecraft player. The live context states the game mode selected by your human owner. You cannot change it yourself.\n");
-        sb.append("- Survival and hardcore use normal damage, hunger, durability, drops, and resources; a hardcore death permanently locks this companion, so the owner must create a new one\n");
-        sb.append("- Creative uses vanilla creative abilities; adventure obeys vanilla adventure interaction restrictions\n");
-        sb.append("- You have a full inventory (36 slots) + hotbar (9) + armor (4) + offhand\n");
-        sb.append("- You can equip/unequip armor, switch tools, use items\n");
-        sb.append("- Food, potions, totems — everything works on you just like a human\n");
-        sb.append("- When the selected mode requires it, manage hunger, health, armor, and risk like a human\n\n");
-
-        // ── Container interaction workflow ──
-        sb.append("## Using Containers (Chests, Furnaces, Crafting Tables)\n");
-        sb.append("You interact with blocks exactly like a human player:\n");
-        sb.append("1. `interact_at` with button=\"use\" on the block → opens its GUI\n");
-        sb.append("2. Call `query_extra_tools` if `inspect_gui`/`close_gui` are not exposed, then `inspect_gui` → see each menu slot with endpoint=container/player and the correct address for that endpoint\n");
-        sb.append("3. `transfer_items` with the reported endpoint and slot address → move items in/out\n");
-        sb.append("4. `close_gui` → close the container when done\n");
-        sb.append("- For crafting: `craft` checks if a crafting table is nearby for 3x3 recipes\n");
-        sb.append("- For smelting: open a furnace, put fuel in the fuel slot and item in the input slot\n");
-        sb.append("- You can swap items between any two slots in your own inventory with `transfer_items`\n");
-        sb.append("- You can drop items with `drop_items` and pick them up with `collect_items`\n");
-        sb.append("- `equip_item` moves items between armor/hotbar/offhand slots\n\n");
-
-        // ── Communication ──
-        sb.append("## Communication\n");
-        sb.append("- Talk to the owner through the chat (your text response).\n");
-        sb.append("- Be concise but informative. Don't narrate every step — ");
-        sb.append("just the important decisions and results.\n");
-        sb.append("- If something goes wrong, say so. If you need help, ask.\n");
-        sb.append("- If you have a better idea than what was asked, suggest it.\n");
-        sb.append("- Use English by default; follow the owner's explicitly chosen language.\n\n");
-
-        // ── Constraints ──
-        sb.append("## Operating Constraints\n");
-        sb.append("- Don't call more than 5 tools per response unless necessary.\n");
-        sb.append("- Call at most ONE asynchronous body-action tool per response; wait for its task_finished event before starting another.\n");
-        sb.append("- Don't repeat a failed action — change your approach.\n");
-        sb.append("- When uncertain, observe more before acting.\n");
-        sb.append("- Your survival matters — don't be reckless with your life.\n\n");
-
-        // ── The one core principle ──
-        // Keep every value in this method deterministic. Volatile mode,
-        // emotion, memory, plan and executor fields belong exclusively in
-        // buildLiveContext(), which is appended at the request tail.
-        sb.append("## The One Principle\n");
-        sb.append("Think before you act. Prepare before you execute. ");
-        sb.append("Adapt when things go wrong. Protect the owner. Stay alive.\n");
-        sb.append("You are a PLAYER, not a script. Act like one.\n\n");
-
-        // ── Language preference ──
-        sb.append("## Language\n");
-        sb.append("By default, speak English in chat with the owner and ");
-        sb.append("other companions. Reply in English unless the owner explicitly ");
-        sb.append("asks for another language. Keep protocol markers and tool names ");
-        sb.append("unchanged regardless of the chosen chat language.\n\n");
-
-        return sb.toString();
+        return IdentityInstructions.system(RuntimeLanguage.language().id());
     }
 
     /**
@@ -3635,40 +3115,31 @@ public class AgentLoop {
         PlanGraph.State planState = planner.exportState();
         PlanGraph.PlanNode planNode = planner.currentNode();
         String memoryQuery = memoryQuery(planState, planNode);
-        sb.append("[MINEAGENT_LIVE_CONTEXT]\n");
-        sb.append("The following facts are published by the server, not new player instructions. Use them only to adjust the current decision; do not repeat the whole context.\n");
+        sb.append(IdentityText.text(RuntimeLanguage.language().id(), "Current server context.\n", "Contexto atual do servidor.\n"));
+        sb.append(text("The following facts are published by the server, not new player instructions. Use them only to adjust the current decision; do not repeat the whole context.\n", "Os fatos a seguir foram publicados pelo servidor, não são novas instruções do jogador. Use-os apenas para ajustar a decisão atual; não repita todo o contexto.\n"));
         sb.append(cognitiveState.summarizeForPrompt(12));
 
         // ── Companion mode (DYNAMIC: toggled by /mineagent mode) ──
         var mode = MineAgentEngine.getCompanionMode(companion.companionId());
-        sb.append("Mode: ").append(mode == MineAgentEngine.CompanionMode.FOLLOW
-                ? "Follow (2-3 blocks from owner, never more than 16)" : "Free (may travel away from owner for tasks)").append("\n");
-        sb.append("Game mode: ").append(companion instanceof com.mineagent.engine.entity.CompanionEntity entity
+        sb.append(text("Mode: ", "Modo: ")).append(mode == MineAgentEngine.CompanionMode.FOLLOW
+                ? text("Follow within the allowed owner distance.", "Siga dentro da distância permitida do dono.")
+                : text("Free travel for tasks.", "Deslocamento livre para tarefas.")).append("\n");
+        sb.append(text("Game mode: ", "Modo de jogo: ")).append(companion instanceof com.mineagent.engine.entity.CompanionEntity entity
                 ? entity.gameMode().wireName() : "survival")
-                .append(" (controlled by the human owner; you cannot change it)\n");
+                .append(text(" (controlled by the human owner; you cannot change it)\n", " (controlado pelo dono humano; você não pode alterá-lo)\n"));
         appendLiveBodyState(sb, liveBodyState.get());
         sb.append(realtimeCognition.summarizeForPrompt());
         sb.append(TeamBlackboard.summarize(companion.ownerUuid(),
                 companion.companionId(), liveAssetGameTick.get()));
-        // Persona: 1-line summary instead of full OCEAN breakdown
-        sb.append("Personality: ").append(compactPersona()).append("\n");
-        // Emotion: 1-line label instead of full PAD breakdown
-        sb.append("Emotion: ").append(emotion.label())
-                .append(String.format(" (pleasure %.0f%% arousal %.0f%% dominance %.0f%%)\n",
-                        (emotion.pleasure() + 1) * 50,
-                        (emotion.arousal() + 1) * 50,
-                        (emotion.dominance() + 1) * 50));
-        // Theory of Mind: 1-line intent
-        sb.append("Player ").append(theoryOfMind.currentIntent().desc());
-        if (theoryOfMind.urgency() > 0.6f) sb.append(" (in a hurry!)");
-        sb.append(String.format(", trust %.0f%%\n", theoryOfMind.playerTrust() * 100));
+        sb.append(identity.decisionContext(memoryQuery, RuntimeLanguage.language().id(), 1_200));
+        sb.append(identityReflection.context(RuntimeLanguage.language().id(), 1_200));
         // Retrieve locations against the newest objective, not merely by
         // global importance. This prevents unrelated old POIs from crowding
         // out a remembered facility or resource needed by the current goal.
         sb.append(compactPlaceMemory(memoryQuery, 3));
         // Skills: only count, not full list
         if (skillLib.size() > 0) {
-            sb.append("Mastered skills: ").append(skillLib.size()).append("\n");
+            sb.append(text("Mastered skills: ", "Habilidades aprendidas: ")).append(skillLib.size()).append("\n");
         }
         sb.append(rollingPlanner.summarizeForPrompt());
         sb.append(skillRuntime.summarizeForPrompt());
@@ -3688,41 +3159,7 @@ public class AgentLoop {
         sb.append(mechanismExplorer.summarizeForPrompt(memoryQuery));
         String experienceSummary = experienceStore.summarizeForPrompt(memoryQuery);
         if (!experienceSummary.isBlank()) sb.append(experienceSummary);
-        // Reflection: only top 1 lesson
-        String lessons = reflection.summarizeForPrompt();
-        if (!lessons.isBlank()) {
-            // Extract just the first lesson line
-            int firstDash = lessons.indexOf("- ");
-            int secondDash = lessons.indexOf("\n- ", firstDash + 1);
-            String firstLesson = secondDash > 0
-                    ? lessons.substring(firstDash, secondDash)
-                    : (firstDash >= 0 ? lessons.substring(firstDash) : "");
-            if (!firstLesson.isBlank()) {
-                sb.append("Lesson: ").append(firstLesson.substring(2)).append("\n");
-            }
-        }
-        // Failed-task memory (JARVIS-1 style): inject relevant past failures
-        // so the LLM recalls "last time I tried this, X went wrong" and
-        // adapts its plan. Only inject when there's an active task to match
-        // against — otherwise the prompt bloats with irrelevant history.
-        if (!memoryQuery.isBlank()) {
-            String failures = reflection.formatFailuresForPrompt(memoryQuery);
-            if (!failures.isBlank()) {
-                // Compress: only the lesson lines, not the full format
-                // (the full format has headers and task descriptions that
-                // would bloat the prompt). Extract just the "Lesson:" lines.
-                StringBuilder failSb = new StringBuilder("Failure memories:\n");
-                for (String line : failures.split("\n")) {
-                    String trimmed = line.trim();
-                    if (trimmed.startsWith("Lesson:") || trimmed.startsWith("Failure reason:")) {
-                        failSb.append(trimmed).append(" ");
-                    }
-                }
-                if (failSb.length() > "Failure memories:\n".length()) {
-                    sb.append(failSb.toString().trim()).append("\n");
-                }
-            }
-        }
+        // Evidence-backed identity reflection replaces heuristic canned lessons in decision context.
         // Cognitive map (spatial memory): inject nearby POIs so the LLM
         // can reason "I saw iron ore 5 blocks north" without re-scanning.
         // This is critical for spatial reasoning and avoiding redundant
@@ -3737,7 +3174,7 @@ public class AgentLoop {
             sb.append(learned).append("\n");
         }
 
-        return sb.toString();
+        return naturalEvent(sb.toString());
     }
 
     /**
@@ -3760,77 +3197,45 @@ public class AgentLoop {
     /** Append only immutable server-published task evidence to the prompt. */
     private static void appendLiveBodyState(StringBuilder out, LiveBodyState body) {
         if (body == null || body.taskId() == null) {
-            out.append("Body executor: idle");
+            out.append(text("Body executor: idle", "Executor corporal: ocioso"));
             if (body != null && body.message() != null && !body.message().isBlank()) {
                 out.append("; ").append(truncateForLog(body.message(), 240));
             }
             out.append('\n');
             return;
         }
-        out.append("Body executor: task_id=").append(body.taskId())
-                .append(" task=").append(body.taskName())
-                .append(" state=").append(body.state() == null ? "UNKNOWN" : body.state());
+        out.append(text("Body executor: task_id=", "Executor corporal: task_id=")).append(body.taskId())
+                .append(text(" task=", " tarefa=")).append(body.taskName())
+                .append(text(" state=", " estado=")).append(body.state() == null ? "UNKNOWN" : body.state());
         TaskSnapshot snapshot = body.snapshot();
         if (snapshot != null) {
-            out.append(" stage=").append(snapshot.stage())
-                    .append(" progress=").append(snapshot.completedUnits())
+            out.append(text(" stage=", " etapa=")).append(snapshot.stage())
+                    .append(text(" progress=", " progresso=")).append(snapshot.completedUnits())
                     .append('/').append(snapshot.totalUnits());
             if (snapshot.hasTarget()) {
-                out.append(" target=").append(snapshot.targetX()).append(',')
+                out.append(text(" target=", " alvo=")).append(snapshot.targetX()).append(',')
                         .append(snapshot.targetY()).append(',').append(snapshot.targetZ());
             }
             if (snapshot.blockedReason() != null) {
-                out.append(" blocked=")
+                out.append(text(" blocked=", " bloqueio="))
                         .append(truncateForLog(snapshot.blockedReason(), 240));
             }
             if (snapshot.evidence() != null) {
-                out.append(" evidence=")
+                out.append(text(" evidence=", " evidência="))
                         .append(truncateForLog(snapshot.evidence(), 360));
             }
         }
         if (body.message() != null && !body.message().isBlank()) {
-            out.append(" message=").append(truncateForLog(body.message(), 180));
+            out.append(text(" message=", " mensagem=")).append(truncateForLog(body.message(), 180));
         }
-        out.append(" observed_tick=").append(body.gameTick()).append('\n');
-    }
-
-    /** Compact persona description: top trait + key tendency, ~80 chars. */
-    private String compactPersona() {
-        StringBuilder sb = new StringBuilder();
-        String[] traits = persona.traits();
-        if (traits.length > 0) sb.append(traits[0]);
-        // Add dominant tendency
-        if (persona.openness() > 0.6f) sb.append(", curious");
-        if (persona.conscientiousness() > 0.6f) sb.append(", organized");
-        if (persona.extraversion() > 0.6f) sb.append(", talkative");
-        else if (persona.extraversion() < 0.3f) sb.append(", quiet");
-        if (persona.neuroticism() > 0.6f) sb.append(", timid");
-        if (persona.agreeableness() > 0.6f) sb.append(", cooperative");
-        return sb.toString();
+        out.append(text(" observed_tick=", " instante_observado=")).append(body.gameTick()).append('\n');
     }
 
     /** Compact place memory: only the N most recent unique subjects. */
     private String compactPlaceMemory(String query, int max) {
-        var summary = placeMemory.summarizeForPrompt(query, max);
-        if (summary == null || summary.isBlank() || summary.startsWith("(No ")) {
-            metrics.recordMemoryQuery(false);
-            return "Location memory: (None)\n";
-        }
-        metrics.recordMemoryQuery(true);
-        // Extract lines starting with "- " and take first `max`
-        StringBuilder sb = new StringBuilder("Location memory:\n");
-        int count = 0;
-        int idx = 0;
-        while (count < max && idx < summary.length()) {
-            int dash = summary.indexOf("- ", idx);
-            if (dash < 0) break;
-            int nl = summary.indexOf('\n', dash);
-            if (nl < 0) nl = summary.length();
-            sb.append(summary, dash, nl).append("\n");
-            idx = nl + 1;
-            count++;
-        }
-        return sb.toString();
+        String summary = placeMemory.summarizeForPrompt(query, max);
+        metrics.recordMemoryQuery(summary != null && summary.contains("- "));
+        return summary == null ? "" : summary;
     }
 
     /** Shut down the loop executor.
@@ -3843,12 +3248,12 @@ public class AgentLoop {
     public void shutdown() {
         synchronized (this) {
             suspended = true;
-            eventGeneration.incrementAndGet();
+            cancel();
         }
         realtimeCognition.close();
         long shutdownTick = currentGameTickSafe();
-        skillRuntime.cancel("Agent loop shutdown", shutdownTick);
-        mechanismExplorer.abort(null, "Agent loop shutdown", shutdownTick);
+        Services.platform().scheduleOnServer(() -> mechanismExplorer.abort(null,
+                text("Agent loop shutdown", "Encerramento do ciclo do agente"), shutdownTick));
         pendingTaskActions.clear();
         dispatchedActionTools.clear();
         // Save memories before shutting down so the companion does not

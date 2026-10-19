@@ -17,6 +17,9 @@ import com.mineagent.engine.skill.SkillLibrary;
 import com.mineagent.engine.exploration.MechanismExplorer;
 import com.mineagent.engine.cognition.CognitiveState;
 import com.mineagent.api.llm.ChatMessage;
+import com.mineagent.engine.identity.EvolvingIdentity;
+import com.mineagent.engine.identity.IdentityReflection;
+import com.mineagent.engine.identity.IdentityPersistence;
 import com.mineagent.api.llm.ProviderSessionState;
 
 import java.io.IOException;
@@ -85,6 +88,16 @@ public class MemoryPersistence {
 
     /** Autosave interval in milliseconds */
     private static final long AUTO_SAVE_INTERVAL = 60_000;
+
+    private EvolvingIdentity identity;
+    private IdentityReflection identityReflection;
+
+    /** Additive attachment preserves the existing constructor and every legacy save format. */
+    public synchronized MemoryPersistence attachIdentity(EvolvingIdentity identity, IdentityReflection reflection) {
+        this.identity = java.util.Objects.requireNonNull(identity);
+        this.identityReflection = java.util.Objects.requireNonNull(reflection);
+        return this;
+    }
 
     private volatile Path memoryDir;
     private final CognitiveMap cognitiveMap;
@@ -162,6 +175,10 @@ public class MemoryPersistence {
             System.err.println("[MineAgent] Failed to create memory dir: " + e.getMessage());
             return;
         }
+        if (identity != null) {
+            try { IdentityPersistence.save(memoryDir, identity, identityReflection); }
+            catch (Exception failure) { System.err.println("[MineAgent] Save identity failed: " + failure.getMessage()); }
+        }
         try { saveCognitiveMap(); } catch (Exception e) {
             System.err.println("[MineAgent] Save cognitive map failed: " + e.getMessage());
         }
@@ -231,6 +248,8 @@ public class MemoryPersistence {
      */
     public synchronized void loadAll() {
         if (!Files.isDirectory(memoryDir)) return;
+        if (identity != null) loadWithQuarantine(IdentityPersistence.FILE_NAME, "identity",
+                () -> IdentityPersistence.load(memoryDir, identity, identityReflection));
         loadWithQuarantine(COGNITIVE_MAP_FILE, "cognitive map", this::loadCognitiveMap);
         loadWithQuarantine(PLACE_EVENT_FILE, "place events", this::loadPlaceEventMemory);
         loadWithQuarantine(IMPORTANCE_FILE, "importance weights", this::loadImportanceWeights);
@@ -935,6 +954,11 @@ public class MemoryPersistence {
      */
     public synchronized void clearAll() {
         try {
+            Files.deleteIfExists(memoryDir.resolve(IdentityPersistence.FILE_NAME));
+            if (identity != null) {
+                identity.importState(null);
+                identityReflection.importState(null);
+            }
             Files.deleteIfExists(memoryDir.resolve(COGNITIVE_MAP_FILE));
             Files.deleteIfExists(memoryDir.resolve(PLACE_EVENT_FILE));
             Files.deleteIfExists(memoryDir.resolve(IMPORTANCE_FILE));

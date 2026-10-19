@@ -33,6 +33,10 @@ import com.mineagent.tools.planning.PlanAcquisitionTool;
 import com.mineagent.tools.skill.LearnedSkillsTool;
 import com.mineagent.tools.skill.LoadSkillTool;
 import com.mineagent.tools.skill.ExecuteSkillTool;
+import com.mineagent.tools.identity.IdentityMemoryTool;
+import com.mineagent.tools.construction.ConstructionTool;
+import com.mineagent.tools.construction.ExecuteConstructionTool;
+import com.mineagent.engine.construction.MinecraftConstructionBridge;
 
 /**
  * Registers all MineAgent built-in tools. Called at mod initialization.
@@ -55,6 +59,11 @@ public final class ToolRegistration {
         ToolRegistry.register(new ResolveNeedTool());
         ToolRegistry.register(new PlanAcquisitionTool());
         ToolRegistry.register(new ExploreMechanismTool());
+
+        // Evidence-backed identity and progressively discovered construction.
+        ToolRegistry.register(new IdentityMemoryTool());
+        ToolRegistry.register(new ConstructionTool(MinecraftConstructionBridge::open, null));
+        ToolRegistry.register(new ExecuteConstructionTool(MinecraftConstructionBridge::open));
 
         // Block
         ToolRegistry.register(new AutoMineTool());

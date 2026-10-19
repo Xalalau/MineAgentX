@@ -3,6 +3,8 @@ package com.mineagent.engine;
 import com.mineagent.api.agent.tool.ToolRegistry;
 import com.mineagent.api.agent.skill.SkillRegistry;
 import com.mineagent.api.config.MineAgentConfig;
+import com.mineagent.api.i18n.RuntimeLanguage;
+import com.mineagent.api.safety.CombatPolicy;
 import com.mineagent.api.entity.AgentPlayer;
 import com.mineagent.api.entity.CompanionGameMode;
 import com.mineagent.api.entity.CompanionLifecycle;
@@ -125,7 +127,7 @@ public final class MineAgentEngine {
         configDirPath = configDir;
 
         // Load configuration from disk (or create defaults)
-        config = MineAgentConfig.load(configDir);
+        applyConfiguration(MineAgentConfig.load(configDir));
 
         // Only local OpenAI-compatible Bonsai and native Ollama inference are built in.
         LLMProviderRegistry.register(new OpenAICompatibleProvider());
@@ -175,6 +177,15 @@ public final class MineAgentEngine {
      */
     public static MineAgentConfig getConfig() {
         return config;
+    }
+
+    /** Activate a fully validated server configuration; failed loads retain existing policy. */
+    private static void applyConfiguration(MineAgentConfig next) {
+        Objects.requireNonNull(next);
+        RuntimeLanguage.configure(next.language());
+        boolean allowAttacks = next.safety().allowPlayerAndCompanionAttacks();
+        CombatPolicy.configure(new CombatPolicy(allowAttacks, allowAttacks));
+        config = next;
     }
 
     /**
@@ -789,7 +800,8 @@ public final class MineAgentEngine {
                 resolvedProvider, resolvedKey, resolvedModel, resolvedBaseUrl,
                 temperature, previous.maxTokens());
         config = new MineAgentConfig(llm, config.companion(),
-                config.survival(), config.pathfinding());
+                config.survival(), config.pathfinding(), config.language(),
+                config.safety(), config.vision(), config.reflection());
         if (configDirPath != null && !config.save(configDirPath)) {
             owner.sendSystemMessage(Component.literal(
                     "[MineAgent] Companion created, but the connection settings "
@@ -1514,62 +1526,16 @@ public final class MineAgentEngine {
     public static void onPlayerChat(ServerPlayer sender, String message) {
         List<CompanionState> all = getCompanionsByOwner(sender.getUUID());
         if (all.isEmpty()) return;
-
-        // ── @mention routing ──
-        // "@<name> <msg>"  → route to the named companion only
-        // "@all <msg>"     → broadcast to ALL companions
-        // "@<msg>"         → route to PRIMARY companion (the @ is just a prefix)
-        // "<msg>" (no @)   → route to the PRIMARY companion only
-        String trimmed = message.trim();
-        String ownerName = sender.getName().getString();
-
-        if (trimmed.startsWith("@")) {
-            // Find the first space to split @target and the rest
-            int spaceIdx = trimmed.indexOf(' ');
-            if (spaceIdx > 0) {
-                String target = trimmed.substring(1, spaceIdx).trim();
-                String rest = trimmed.substring(spaceIdx + 1).trim();
-                String prefixed = "[" + ownerName + "]: " + rest;
-
-                if ("all".equalsIgnoreCase(target)) {
-                    // Broadcast to every companion
-                    for (CompanionState s : all) {
-                        s.loop.onOwnerMessage(prefixed);
-                    }
-                    return;
-                }
-                // Find the named companion
-                for (CompanionState s : all) {
-                    if (target.equalsIgnoreCase(s.companion.companionName())) {
-                        s.loop.onOwnerMessage(prefixed);
-                        return;
-                    }
-                }
-                // No matching companion name — inform the player
-                sender.sendSystemMessage(Component.literal(
-                        "§c[MineAgent] No companion named '" + target + "'. Available: "
-                                + all.stream().map(s -> s.companion.companionName())
-                                        .reduce((a, b) -> a + ", " + b).orElse("none")));
-                return;
-            }
-            // "@name" with no space — treat the whole thing as a message
-            // to the primary companion (e.g. "@gather wood" -> primary hears "gather wood")
-            CompanionState primary = all.get(0);
-            primary.loop.onOwnerMessage("[" + ownerName + "]: " + trimmed.substring(1));
-            return;
-        }
-
-        // No @mention → primary companion
-        CompanionState primary = all.get(0);
-        primary.loop.onOwnerMessage("[" + ownerName + "]: " + message);
+        com.mineagent.engine.conversation.ConversationDelivery.deliverSpeech(
+                sender.getName().getString(), message, all.get(0).loop::onOwnerMessage);
     }
 
     /**
      * Broadcast a companion's spoken message to the player's OTHER companions
      * so they can hear each other and collaborate. Used for AI-to-AI chat.
      *
-     * <p>The message is delivered as a user message tagged with the speaker's
-     * name. To prevent infinite loops, this is only called for messages
+     * <p>The message is delivered as ordinary speech attributed to the speaker.
+     * To prevent infinite loops, this is only called for messages
      * spoken by a companion in response to the owner — not for messages
      * received from other companions.
      *
@@ -1590,7 +1556,8 @@ public final class MineAgentEngine {
                 // through onOwnerMessage corrupted TheoryOfMind, cache keys and
                 // interruption priority. Explicit team events have their own
                 // channel and routine state is shared through TeamBlackboard.
-                s.loop.onTeamEvent("from=" + speakerName + " message=" + text);
+                com.mineagent.engine.conversation.ConversationDelivery.deliverSpeech(
+                        speakerName, text, s.loop::onTeamEvent);
             }
         }
     }
@@ -2113,7 +2080,7 @@ public final class MineAgentEngine {
                         // Use the platform-provided config directory captured
                         // during init; the process working directory is not
                         // guaranteed to be the Minecraft game directory.
-                        if (configDirPath != null) config = MineAgentConfig.load(configDirPath);
+                        if (configDirPath != null) applyConfiguration(MineAgentConfig.load(configDirPath));
                         source.sendSuccess(() -> Component.literal(
                                 "§a[MineAgent] Configuration reloaded!"), false);
                         source.sendSuccess(() -> Component.literal(
@@ -2293,7 +2260,8 @@ public final class MineAgentEngine {
                                     return 0;
                                 }
 
-                                config = new MineAgentConfig(llm, comp, config.survival(), config.pathfinding());
+                                config = new MineAgentConfig(llm, comp, config.survival(), config.pathfinding(), config.language(),
+                config.safety(), config.vision(), config.reflection());
                                 if (configDirPath != null) config.save(configDirPath);
 
                                 // API keys arrive through a command packet, but must
