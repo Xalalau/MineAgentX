@@ -197,7 +197,10 @@ public class AgentLoop {
 
     private final List<ChatMessage> history = new ArrayList<>();
     /** Pending deliberation events, coalesced by semantic identity. */
-    private final LinkedHashMap<String, String> inbox = new LinkedHashMap<>();
+    private enum EventSource { MACHINE, PEER }
+    private record PendingEvent(EventSource source, String text) {}
+    private final LinkedHashMap<String, PendingEvent> inbox = new LinkedHashMap<>();
+    private long peerEventSequence;
     private final Object inboxLock = new Object(); // unified inbox lock (L1 fix)
     private static final int MAX_PENDING_EVENTS = 32;
 
@@ -542,34 +545,40 @@ public class AgentLoop {
      * that emit unbounded diagnostics.
      */
     private boolean enqueueInbox(String event) {
+        return enqueueInbox(event, EventSource.MACHINE);
+    }
+
+    private boolean enqueueInbox(String event, EventSource source) {
         if (event == null || event.isBlank()) return false;
-        String normalized = event.trim();
-        String key = inboxKey(normalized);
         synchronized (inboxLock) {
-            String previous = inbox.put(key, normalized);
+            // Speech has no machine identity, even when it quotes a terminal marker.
+            String key = source == EventSource.PEER ? "peer:" + ++peerEventSequence
+                    : "machine:" + inboxKey(event.stripLeading());
+            PendingEvent pending = new PendingEvent(source, event);
+            PendingEvent previous = inbox.put(key, pending);
             while (inbox.size() > MAX_PENDING_EVENTS) {
                 Iterator<String> oldest = inbox.keySet().iterator();
                 if (!oldest.hasNext()) break;
                 oldest.next();
                 oldest.remove();
             }
-            return previous == null || !previous.equals(normalized);
+            return !pending.equals(previous);
         }
     }
 
     private static String inboxKey(String event) {
-        if (event.contains("[TASK_FINISHED]")) {
+        if (event.startsWith("[TASK_FINISHED]")) {
             return "task_finished:" + eventField(event, "task_id");
         }
-        if (event.contains("[SKILL_FINISHED]")) {
+        if (event.startsWith("[SKILL_FINISHED]")) {
             return "skill_finished:" + eventField(event, "run_id");
         }
-        if (event.contains("[ROLLING_REPLAN]")) {
+        if (event.startsWith("[ROLLING_REPLAN]")) {
             return "rolling:" + eventField(event, "reason") + ':'
                     + eventField(event, "active_step");
         }
-        if (event.contains("[GOAL_VERIFIED]")) return "goal_verified";
-        if (event.contains("[COGNITION_DECISION]")) return "cognition_decision";
+        if (event.startsWith("[GOAL_VERIFIED]")) return "goal_verified";
+        if (event.startsWith("[COGNITION_DECISION]")) return "cognition_decision";
         return event.replaceAll("\\s+", " ");
     }
 
@@ -587,22 +596,14 @@ public class AgentLoop {
      */
     public void onOwnerMessage(String message) {
         if (message == null || message.isBlank()) return;
-        executionOwner.revokeAll(executionUnavailable(), eventGeneration::incrementAndGet);
+        executionOwner.invalidate(eventGeneration::incrementAndGet);
         identityReflection.close();
         identity.recordEvidence("player_claim", "owner", message, liveAssetGameTick.get());
-        // Track last owner command for decision cache keying
+        // Speech informs retrieval/cache freshness, not an automatically admitted objective.
         lastOwnerCommand = message.length() > 120 ? message.substring(0, 120) : message;
-        // Keep a separate, bounded objective. The cache key deliberately uses
-        // a shorter string, but retrieval and learned skills must not fall back
-        // to an older plan node just because the new instruction was truncated.
-        activeOwnerGoal = truncateForLog(message, 360);
+        latestOwnerSpeech = truncateForLog(message, 360);
         lastOwnerMessageTime = System.currentTimeMillis();
-        prepareToolsForOwnerIntent(message);
-        semanticWorldModel.recordOwnerIntent(message, currentGameTickSafe());
-        layeredMemory.remember(LayeredMemory.Tier.WORKING, "owner.intent",
-                truncateForLog(message, 360), "owner_message", 1.0,
-                currentGameTickSafe(), 400L, "current", "current");
-        cognitiveState.append("owner_intent", "owner", truncateForLog(message, 300),
+        cognitiveState.append("owner_speech", "owner", truncateForLog(message, 300),
                 currentGameTickSafe());
         // Speech remains a sourced report; only evidence-backed reflection revises identity.
         synchronized (history) {
@@ -621,7 +622,7 @@ public class AgentLoop {
                 currentGameTickSafe(), 240L, "current", "current");
         // Keep routine body telemetry out of personal reflection; retain meaningful executor events.
         if (isDeliberationEvent(narrative)) {
-            identity.recordEvidence("observation", "body", naturalEvent(narrative), liveAssetGameTick.get());
+            identity.recordEvidence("observation", "body", narrative, liveAssetGameTick.get());
         }
 
         // Low-level body observations are evidence, not independent decision
@@ -630,7 +631,7 @@ public class AgentLoop {
         // request even without wake(). LiveBodyState/RealtimeCognition already
         // carry routine evidence, so only deliberation events enter the inbox.
         if (isDeliberationEvent(narrative)
-                && enqueueInbox("[BODY] " + narrative)) {
+                && enqueueInbox(narrative)) {
             wake("body_log");
         }
     }
@@ -638,7 +639,7 @@ public class AgentLoop {
     /** Receive an explicit teammate event without treating it as owner speech. */
     public void onTeamEvent(String event) {
         if (event == null || event.isBlank()) return;
-        if (enqueueInbox("[TEAM] " + event.trim())) {
+        if (enqueueInbox(event, EventSource.PEER)) {
             wake("team_event");
         }
     }
@@ -1320,15 +1321,6 @@ public class AgentLoop {
         }
     }
 
-    /**
-     * Select optional schemas once per owner goal. This is a latency router,
-     * not a task classifier: the LLM still decides what to do, and
-     * query_extra_tools remains the language/mod-agnostic fallback.
-     */
-    private void prepareToolsForOwnerIntent(String message) {
-        exposedExtraTools.clear();
-        // Discovery is model-driven in any language, never a keyword task classifier.
-    }
 
     private static boolean containsAny(String value, String... needles) {
         if (value == null || value.isBlank()) return false;
@@ -1736,15 +1728,13 @@ public class AgentLoop {
         return currentGoalContext(planner.exportState(), planner.currentNode());
     }
 
-    /** Prefer the newest owner objective over a plan restored from an older turn. */
+    /** Objectives come from deliberated plans, never the mere arrival of speech. */
     private String currentGoalContext(PlanGraph.State plan, PlanGraph.PlanNode node) {
-        if (activeOwnerGoal != null && !activeOwnerGoal.isBlank()) return activeOwnerGoal;
         if (plan != null && plan.goal() != null && !plan.goal().isBlank()) return plan.goal();
         if (node != null && node.description() != null && !node.description().isBlank()) {
             return node.description();
         }
-        return lastOwnerCommand == null || lastOwnerCommand.isBlank()
-                ? text("current task", "tarefa atual") : lastOwnerCommand;
+        return text("current task", "tarefa atual");
     }
 
     /** Preserve parameters so a learned sequence is adaptable, not a name list. */
@@ -1982,6 +1972,9 @@ public class AgentLoop {
     private VersionedResponse callLLMWithRetry(LLMProvider provider,
                                                 List<Map<String, Object>> toolDefs,
                                                 int roundNumber) {
+        // The generation covers the snapshot, not merely the subsequent IO.
+        // Speech arriving during live-context assembly must invalidate that old history too.
+        long callGeneration = eventGeneration.get();
         refreshSystemPromptIfNeeded();
         List<ChatMessage> messagesToSend;
         List<ChatMessage> fallbackHistory;
@@ -2007,10 +2000,6 @@ public class AgentLoop {
         fallbackHistory.add(live);
         messagesToSend = Collections.unmodifiableList(messagesToSend);
 
-        // Use a monotonic counter rather than wall-clock time. Two owner events
-        // can legitimately arrive in one millisecond, and a timestamp equality
-        // check would then accept an obsolete response.
-        long callGeneration = eventGeneration.get();
 
         for (int attempt = 0; attempt < MAX_RETRIES; attempt++) {
             ProviderSessionState providerStateBefore = providerTransportState.get();
@@ -2169,7 +2158,7 @@ public class AgentLoop {
     }
 
     private boolean complexStructuredOutputLikely() {
-        String goal = activeOwnerGoal == null ? "" : activeOwnerGoal.toLowerCase(Locale.ROOT);
+        String goal = planner.exportState().goal().toLowerCase(Locale.ROOT);
         return containsAny(goal, "build", "blueprint", "structure", "architect",
                 "construction");
     }
@@ -2555,8 +2544,11 @@ public class AgentLoop {
             // context supplies the final user-role message for provider requests.
             StringBuilder sb = new StringBuilder(IdentityText.text(RuntimeLanguage.language().id(),
                     "Server observations, not new player instructions.\n", "Observações do servidor, não novas instruções do jogador.\n"));
-            for (String entry : batch) {
-                sb.append(ModelText.external(RuntimeLanguage.language(), naturalEvent(entry))).append("\n");
+            for (PendingEvent entry : batch) {
+                sb.append(entry.source() == EventSource.PEER
+                        ? text("Teammate speech: ", "Fala de colega: ")
+                        : text("Server event: ", "Evento do servidor: "));
+                sb.append(ModelText.external(RuntimeLanguage.language(), entry.text())).append("\n");
             }
             synchronized (history) {
                 history.add(ChatMessage.system(sb.toString()));
@@ -2564,10 +2556,6 @@ public class AgentLoop {
         }
     }
 
-    /** Removes internal machine event delimiters only from server-produced framing, never owner speech. */
-    private static String naturalEvent(String text) {
-        return text == null ? "" : text.replaceAll("\\[([A-Z_]+)]", "$1: ");
-    }
 
     private static boolean isExplicitTeamMessage(String text) {
         if (text == null) return false;
@@ -2648,8 +2636,10 @@ public class AgentLoop {
                                             java.util.function.BooleanSupplier additionalPolicy) {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(Math.max(1, tool.defaultTimeoutSeconds()));
         AtomicReference<ToolExecution> holder = new AtomicReference<>();
+        long ownerRevision = executionOwner.revision();
         ExecutionOwner.Lease lease = executionOwner.open(id,
-                () -> !suspended && eventGeneration.get() == acceptedGeneration && additionalPolicy.getAsBoolean(),
+                () -> eventGeneration.get() == acceptedGeneration,
+                () -> !suspended && executionOwner.revision() == ownerRevision && additionalPolicy.getAsBoolean(),
                 deadline, () -> {
                     if (tool.dispatchesAsyncTask()) cancelOwnedTaskNow(id);
                     ToolExecution execution = holder.get();
@@ -3006,8 +2996,8 @@ public class AgentLoop {
     /** Track the last owner command for cache keying. */
     private volatile String lastOwnerCommand = "";
 
-    /** Full active owner objective used for memory retrieval and skill naming. */
-    private volatile String activeOwnerGoal = "";
+    /** Bounded conversation retrieval cue; it confers no task or plan authority. */
+    private volatile String latestOwnerSpeech = "";
 
     /** Timestamp of the last player message, used by decision-cache safety gates. */
     private volatile long lastOwnerMessageTime = 0;
@@ -3237,7 +3227,7 @@ public class AgentLoop {
             sb.append(learned).append("\n");
         }
 
-        return naturalEvent(sb.toString());
+        return sb.toString();
     }
 
     /**
@@ -3247,7 +3237,7 @@ public class AgentLoop {
      */
     private String memoryQuery(PlanGraph.State planState, PlanGraph.PlanNode node) {
         LinkedHashSet<String> parts = new LinkedHashSet<>();
-        if (activeOwnerGoal != null && !activeOwnerGoal.isBlank()) parts.add(activeOwnerGoal);
+        if (!latestOwnerSpeech.isBlank()) parts.add(latestOwnerSpeech);
         if (planState != null && planState.goal() != null && !planState.goal().isBlank()) {
             parts.add(planState.goal());
         }

@@ -128,6 +128,8 @@ Companion attacks on players/companions are denied by default and controlled by 
 
 ## 3. Planning, memory, and autonomy
 
+Vanilla and targeted UI speech share natural EN/PT-BR speaker attribution, preserving the literal body without mandatory tags or command words. Peer speech has a separate inbox identity from server machine events, including when it quotes task/skill terminal markers. External strings and saved history are not globally translated. Ordinary speech updates conversation/retrieval and invalidates stale responses or pending calls; it does not automatically accept a new objective, erase discovered schemas, or revoke admitted tasks/skills. Deliberated plans and native `task_stop` remain the decision paths; explicit cancellation and lifecycle suspension still revoke authority. Recording-provider regressions cover these contracts, not live model judgment or networked gameplay.
+
 - Separate strategic acceptance from individual tactical action success.
 - Maintain rolling tactical plans and explicit dependency graphs.
 - Validate dependencies and reject cycles.

@@ -32,18 +32,28 @@ final class ExecutionWiringTest {
         assertTrue(source.contains("execution.call().dispatch("));
     }
 
-    @Test void cancellationAndNewOwnerInputRetainExactServerOwnedCleanup() throws Exception {
+    @Test void deliberateCancellationRetainsExactServerOwnedCleanup() throws Exception {
         String source = loop();
         assertEquals(1, source.split("auction\\.cancelTask\\(", -1).length - 1);
         assertTrue(source.contains("state.auction.cancelTask(taskId)"));
         assertTrue(source.contains("scheduleOnServer(() -> cancelOwnedTaskNow(actionId))"));
-        for (String method : new String[]{"public synchronized void cancel()", "public void onOwnerMessage(String message)"}) {
-            int start = source.indexOf(method);
-            String body = source.substring(start, source.indexOf("\n    }", start));
-            assertTrue(body.contains("executionOwner.revokeAll(executionUnavailable(), eventGeneration::incrementAndGet)"));
-        }
+        int start = source.indexOf("public synchronized void cancel()");
+        String body = source.substring(start, source.indexOf("\n    }", start));
+        assertTrue(body.contains("executionOwner.revokeAll(executionUnavailable(), eventGeneration::incrementAndGet)"));
         assertTrue(source.contains("executionOwner.release(taskId)"));
         assertTrue(source.contains("Objects.equals(skillRuntime.snapshot().runId(), runId)"));
+    }
+
+    @Test void speechInvalidatesPendingReasoningWithoutRevokingAdmittedWork() throws Exception {
+        String source = loop();
+        int start = source.indexOf("public void onOwnerMessage(String message)");
+        String body = source.substring(start, source.indexOf("\n    }", start));
+        assertTrue(body.contains("executionOwner.invalidate(eventGeneration::incrementAndGet)"));
+        assertFalse(body.contains("executionOwner.revokeAll("));
+        assertFalse(body.contains("exposedExtraTools.clear("));
+        assertFalse(body.contains("recordOwnerIntent("));
+        // OwnerSpeech* runtime tests also cover real dispatch, stale responses,
+        // admitted skills, explicit task_stop and exact deferred cancellation.
     }
 
     @Test void lateReceiptsCannotInvokeLearnedOutcomeWriters() throws Exception {

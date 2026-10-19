@@ -6,7 +6,7 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 
-/** Owner-scoped work survives tool admission, not explicit cancellation or new owner input. */
+/** Owner-scoped work survives conversation, not explicit revocation. */
 public final class ExecutionOwner {
     private final Object gate = new Object();
     private final Map<String, Lease> owned = new LinkedHashMap<>();
@@ -22,9 +22,15 @@ public final class ExecutionOwner {
     }
 
     public Lease open(String id, BooleanSupplier current, long deadline, Runnable cancellation) {
+        return open(id, current, current, deadline, cancellation);
+    }
+
+    /** Admission is reasoning-scoped; after admit, only work authority may revoke the lease. */
+    public Lease open(String id, BooleanSupplier admission, BooleanSupplier authority,
+                      long deadline, Runnable cancellation) {
         synchronized (gate) {
-            Lease lease = new Lease(id, cancellation, current);
-            lease.call = new ExecutionProtocol.Call(() -> !lease.revoked && current.getAsBoolean(), clock, deadline, gate);
+            Lease lease = new Lease(id, cancellation, admission, authority);
+            lease.call = new ExecutionProtocol.Call(lease::active, clock, deadline, gate);
             owned.put(id, lease);
             return lease;
         }
@@ -69,13 +75,18 @@ public final class ExecutionOwner {
         private final String id;
         private final Runnable cancellation;
         private final BooleanSupplier current;
+        private final BooleanSupplier admission;
         private volatile boolean revoked;
         private ExecutionProtocol.Call call;
-        private Lease(String id, Runnable cancellation, BooleanSupplier current) {
-            this.id = id; this.cancellation = cancellation; this.current = current;
+        private Lease(String id, Runnable cancellation, BooleanSupplier admission, BooleanSupplier current) {
+            this.id = id; this.cancellation = cancellation; this.admission = admission; this.current = current;
         }
         public ExecutionProtocol.Call call() { return call; }
-        public boolean active() { return !revoked && current.getAsBoolean(); }
+        public boolean active() {
+            ExecutionProtocol.State state = call == null ? ExecutionProtocol.State.PENDING : call.terminal().state();
+            return !revoked && state != ExecutionProtocol.State.EXPIRED && current.getAsBoolean()
+                    && (state != ExecutionProtocol.State.PENDING || admission.getAsBoolean());
+        }
         public void release() { synchronized (gate) { owned.remove(id, this); } }
         public void requestCancellation() {
             if (cancellation == null) return;

@@ -230,7 +230,8 @@ public final class ServerPacketHandler {
                                 && cs.get().companion.serverPlayerOwner()
                                         .getUUID().equals(sender.getUUID())) {
                             String ownerName = sender.getName().getString();
-                            cs.get().loop.onOwnerMessage("[" + ownerName + "]: " + data);
+                            com.mineagent.engine.conversation.ConversationDelivery.deliverSpeech(
+                                    ownerName, data, cs.get().loop::onOwnerMessage);
                             return;
                         }
                     }
