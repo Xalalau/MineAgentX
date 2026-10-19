@@ -1,0 +1,35 @@
+package com.mineagent.tools.construction;
+
+import com.mineagent.api.i18n.Language;
+import com.mineagent.api.i18n.MessageCatalog;
+import java.util.Map;
+
+/** Module-local catalog with strict locale key/argument parity. Technical IDs remain stable. */
+final class ConstructionText {
+    private ConstructionText() {}
+    private static final MessageCatalog CATALOG = new MessageCatalog(Map.of(
+            Language.EN_US, Map.ofEntries(
+                    Map.entry("description", "Design, find, inspect and revise persistent construction plans. Assess candidate sites, exact materials and effort; render six orthographic PNG views. Use help for decision criteria. Execution is separate and physical."),
+                    Map.entry("help", "Choose the architecture and location from the actual purpose, interior uses, access, free space and observed assets. Compare excavation, trees, terrain changes, materials, effort, existing facilities and transport needs. Record reasons in decisions, inspect candidate sites, render, review and revise before physical execution. Coordinates are local; origin, dimension and quarterTurns define their world mapping. Unspecified cells are not automatically cleared. Effort units equal four per remaining placement plus eight per required excavation; break ticks and approach distance are separate evidence, not a completion-time promise. Material counts are block-item requirements, not raw crafting ingredients. Views render voxel surfaces with deterministic material colors, not game textures or special block-state geometry. The preview hook may attach images to a configured local visual model; attachment does not prove review. Use list, paged read and evidence to retrieve earlier decisions and observed outcomes. Execute one bounded batch through execute_construction, inspect its task and world outcomes, then decide whether to continue or revise."),
+                    Map.entry("invalid", "Construction request rejected; inspect the technical error and current revision."),
+                    Map.entry("stored", "Design revision saved. Inspect site evidence and previews before execution."),
+                    Map.entry("physical", "A dispatched task is not a verified construction outcome. Observe before continuing."),
+                    Map.entry("schema_mode", "Choose detail progressively. revise supplies a complete replacement design and expected_revision; read and evidence are paged."),
+                    Map.entry("schema_clear", "Explicitly authorize only the required excavation recorded in the design; existing assets and unsafe cells remain protected."),
+                    Map.entry("execute_description", "Physically execute one bounded batch from the latest exact construction revision. Uses inventory and ordinary build tasks with navigation, permissions and world verification. Terrain clearing needs explicit authorization. Query task_status and construction observe before continuing.")),
+            Language.PT_BR, Map.ofEntries(
+                    Map.entry("description", "Projete, encontre, consulte e revise planos persistentes de construção. Avalie locais candidatos, materiais exatos e esforço; renderize seis vistas ortográficas PNG. Use help para critérios de decisão. A execução é separada e física."),
+                    Map.entry("help", "Escolha a arquitetura e o local a partir da finalidade real, dos usos internos, do acesso, do espaço livre e dos recursos observados. Compare escavação, árvores, alterações do terreno, materiais, esforço, instalações existentes e necessidades de transporte. Registre os motivos em decisions, inspecione locais candidatos, renderize, avalie e revise antes da execução física. As coordenadas são locais; origin, dimension e quarterTurns definem o mapeamento no mundo. Células não especificadas não são limpas automaticamente. As unidades de esforço equivalem a quatro por colocação restante e oito por escavação necessária; os ticks de quebra e a distância de aproximação são evidências separadas, não uma promessa de prazo. Os materiais são blocos necessários, não ingredientes brutos de fabricação. As vistas mostram superfícies de voxels com cores determinísticas por material, sem texturas do jogo ou geometria de estados especiais. O adaptador de prévias pode anexar imagens a um modelo visual local configurado; o anexo não comprova avaliação. Use list, read paginado e evidence para recuperar decisões e resultados observados. Execute um lote limitado por execute_construction, inspecione a tarefa e seus resultados no mundo e decida se deve continuar ou revisar."),
+                    Map.entry("invalid", "Solicitação de construção rejeitada; consulte o erro técnico e a revisão atual."),
+                    Map.entry("stored", "Revisão do projeto salva. Consulte as evidências do local e as prévias antes de executar."),
+                    Map.entry("physical", "Uma tarefa enviada não comprova o resultado da construção. Observe antes de continuar."),
+                    Map.entry("schema_mode", "Escolha os detalhes progressivamente. revise fornece o projeto completo e expected_revision; read e evidence são paginados."),
+                    Map.entry("schema_clear", "Autorize explicitamente apenas a escavação necessária registrada no projeto; recursos existentes e células inseguras continuam protegidos."),
+                    Map.entry("execute_description", "Execute fisicamente um lote limitado da revisão exata mais recente do projeto. Usa o inventário e tarefas normais de construção com navegação, permissões e verificação no mundo. A limpeza do terreno exige autorização explícita. Consulte task_status e construction observe antes de continuar."))));
+    static String text(String language, String key) { return CATALOG.text(Language.fromId(language), key); }
+    static String description(String language) { return text(language, "description"); }
+    static String help(String language) { return text(language, "help"); }
+    static String invalid(String language) { return text(language, "invalid"); }
+    static String stored(String language) { return text(language, "stored"); }
+    static String physical(String language) { return text(language, "physical"); }
+}
