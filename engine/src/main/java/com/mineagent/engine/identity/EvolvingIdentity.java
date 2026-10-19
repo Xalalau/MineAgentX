@@ -91,13 +91,22 @@ public final class EvolvingIdentity {
         return text != null && !text.isBlank() && text.length() <= max;
     }
 
-    /** Retrieve a few relevant commitments, not a full personality dump. */
+    /** Metadata diversity with lexical ranking, not semantic or cross-language matching. */
     public synchronized String decisionContext(String query, String language, int maxChars) {
         StringBuilder out = new StringBuilder();
-        var selected = learned.values().stream()
-                .filter(entry -> entry.kind().equals("goal") || query == null || query.isBlank() || relevance(query, entry) > 0)
+        var ranked = learned.values().stream()
+                .filter(entry -> !entry.kind().equals("world") || query == null || query.isBlank() || relevance(query, entry) > 0)
                 .sorted(java.util.Comparator.<Entry>comparingInt(entry -> relevance(query, entry)).reversed())
-                .limit(3).toList();
+                .toList();
+        var selected = new java.util.LinkedHashSet<Entry>();
+        // Reserve one goal and one preference even without lexical overlap; never broaden world beliefs.
+        // Ties retain store order, and all records still compete with the hard character budget.
+        ranked.stream().filter(entry -> entry.kind().equals("goal")).findFirst().ifPresent(selected::add);
+        ranked.stream().filter(entry -> entry.kind().equals("preference")).findFirst().ifPresent(selected::add);
+        for (Entry entry : ranked) {
+            if (selected.size() == 3) break;
+            selected.add(entry);
+        }
         for (Entry entry : selected) {
             boolean observed = entry.evidenceIds().stream().allMatch(id -> observations.containsKey(id)
                     && "observation".equals(observations.get(id).origin()));

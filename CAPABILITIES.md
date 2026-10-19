@@ -141,6 +141,8 @@ These mechanisms reduce latency for immediate reactions but are not guarantees o
 - Track action transactions and callbacks to avoid duplicate or unsupported success reports. Typed skill uncertainty, cancellation and deadlines do not train physical failure counters, automatically retry or advance steps; late physical receipts remain observations rather than retroactive success.
 - Maintain evidence-backed evolving preferences, goals and world knowledge with bounded reflection and persistence. Legacy persona data/accessors remain compatible, but randomly assigned persona and canned idle dialogue no longer drive the decision context. Reflection reads the current server interval dynamically: `reflection.intervalTicks` defaults to 1200 game ticks, zero disables it, and positive values are bounded to 200–72000. Reload applies to existing loops; opportunities remain evidence-gated and bounded. Cancellation-safe outcome writers have regression coverage; actual model-driven behavior still requires live validation.
 
+Compact identity context reserves a goal and a preference before completing the lexical ranking, within at most three whole records and the character budget. This preserves a commitment across query-language changes without translating saved memory or claiming semantic relevance. A bounded pure `IdentityDeliberationGate` is tested but not yet connected to idle loop admission; it does not prove spontaneous goal-driven requests or actions.
+
 ## 4. Multiple companions
 
 - Up to three companions per owner.

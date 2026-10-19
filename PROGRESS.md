@@ -107,12 +107,18 @@ A post-compaction reconciliation checked the real Git log/status, JUnit XML, pac
 | `deleg_2cb154a1` / `sa-1-427268c6` | Placement, BlockTargeting, MLGChain, new automatic support/fluid/reach tests and helpers | `.tools/navigation-safety-work/HANDOFF.md` |
 | `deleg_2cb154a1` / `sa-2-9260a27b` | CollectItemsTask, CollectionPickupObservation, new scoped collision helpers/tests; MineAgentEngine only for the minimal physical-half-tick hook | `.tools/collection-collision-work/HANDOFF.md` |
 | `deleg_2cb154a1` / `sa-3-aa775104` | AgentLoop, ServerPacketHandler, ConversationDelivery and new conversation tests/helpers; execution contracts/Todowrite only if indispensable for separating speech from deliberate task authority | `.tools/conversation-boundary-work/HANDOFF.md` |
-| `deleg_488cce5e` / `sa-0-81d47f56` | EvolvingIdentity, optional small IdentityDeliberationGate and new retrieval/gate tests; return any AgentLoop hook unapplied to the coordinator | `.tools/identity-commitment-work/HANDOFF.md` |
+| `deleg_488cce5e` / `sa-0-81d47f56` (released and reviewed) | EvolvingIdentity and pure IdentityDeliberationGate with new retrieval/gate tests; AgentLoop hook deliberately unapplied | `.tools/identity-commitment-work/HANDOFF.md` |
 | `deleg_488cce5e` / `sa-1-77d59ccd` | QueryExtraToolsTool and new selective-discovery helpers/catalog/tests; use existing exposeExtraTools API without editing AgentLoop | `.tools/progressive-discovery-work/HANDOFF.md` |
 
 All six scopes require witnessed specific RED before production fixes, then GREEN and exact proof boundaries. Children do not run Gradle, write shared documentation, stage/commit/push, touch host/launcher/models or close acceptance items. The coordinator preserves shared documentation/Git/Gradle ownership and must not edit the children's source while they own it. Do not poll unfinished handoff files or live transcripts to wait for results.
 
 Next coordinator action: receive and review each exact released handoff, reproduce focused results and inspect diffs; integrate any justified shared hooks only after their owner releases; run a new full test/build and inspect XML/JAR after all relevant writers finish. Keep collision gameplay, real-model quality, protection-mod behavior, command localization and other unchecked acceptance boundaries explicit. Preserve active task-owned recovery files; no cleanup of unfinished evidence.
+
+## Reviewed commitment and discovery deliveries
+
+- `deleg_488cce5e` returned both child handoffs with ownership released. Parent reviewed the identity diff, full helper and tests, and reran `python .tools/identity-commitment-work/run.py parent-review`: 53 tests/14 containers passed. The English-source gate then caught literal CJK in multilingual fixtures; parent preserved the actual runtime strings using Unicode escapes, without changing the checker or behavior. `parent-review-source-gate` repeated all 53 tests/14 containers successfully, XML failures/errors/skips zero; all three repository gates pass.
+- Identity retrieval now reserves a goal/preference ahead of lexical fill, without semantic matching or memory translation. The pure goal gate has bounded literal-evidence deduplication and a 1200-tick cooldown, but its consumer remains UNWIRED. Preserve the handoff's exact-goal visibility, active/paused execution, lifecycle-race and executor-admission requirements for later AgentLoop integration. No goal wake/request/action is claimed by helper tests.
+- Last full Gradle/JAR remains the 531-test `cf94fc3` snapshot. These focused selections use its immutable dependency JAR, not the concurrent loop changes. Do not add overlapping totals or treat focused success as the final integrated build.
 
 ## Verified checkpoints (not final acceptance)
 
