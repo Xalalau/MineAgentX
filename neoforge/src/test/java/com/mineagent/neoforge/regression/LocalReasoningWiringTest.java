@@ -77,6 +77,9 @@ class LocalReasoningWiringTest {
         assertFalse(locale.has("screen.mineagent.bedrock_credentials_hint"));
         String engine = source("engine/src/main/java/com/mineagent/engine/MineAgentEngine.java");
         assertFalse(engine.contains("<off|low|medium|high|xhigh|max>"));
-        assertTrue(engine.contains("[name] <auto>"));
+        String commands = source("engine/src/main/java/com/mineagent/engine/i18n/CommandMessages.java");
+        assertTrue(engine.contains("CommandMessages.text(\"help\")"));
+        assertFalse(commands.contains("<off|low|medium|high|xhigh|max>"));
+        assertTrue(commands.contains("[name] <auto>"));
     }
 }

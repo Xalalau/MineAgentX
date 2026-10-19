@@ -215,7 +215,7 @@ These are instructions available to the model, not guaranteed complete executabl
 
 ## 8. Player commands
 
-All commands use `/mineagent`:
+All commands use `/mineagent`. Generated replies/help and shared creation/lifecycle reasons support server-selected `en_us`/`pt_br`; client UI language is a separate setting. Command names, argument tokens, provider/model IDs, observed names and arbitrary diagnostics remain literal. Configuration output retains credential masking. Actual Brigadier and lifecycle fixtures cover the localized producers, not successful gameplay or external skin-service behavior.
 
 | Command | Purpose |
 | --- | --- |

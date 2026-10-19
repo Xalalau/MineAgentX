@@ -503,14 +503,14 @@ public final class MineAgentEngine {
             }
         } catch (IllegalArgumentException invalidEffort) {
             if (owner != null) owner.sendSystemMessage(Component.literal(
-                    "§c[MineAgent] Cannot spawn companion: " + invalidEffort.getMessage()));
+                    CommandMessages.text("spawn.cannot", CommandMessages.validation(invalidEffort))));
             return null;
         }
         String invalid = validateSpawnArguments(owner, name, providerId, apiKey,
                 model, baseUrl, temperature, reasoningEffort);
         if (invalid != null) {
             if (owner != null) owner.sendSystemMessage(Component.literal(
-                    "§c[MineAgent] Cannot spawn companion: " + invalid));
+                    CommandMessages.text("spawn.cannot", invalid)));
             return null;
         }
 
@@ -522,8 +522,7 @@ public final class MineAgentEngine {
         List<UUID> existing = OWNER_TO_ALL_COMPANIONS.getOrDefault(owner.getUUID(), Collections.emptyList());
         if (existing.size() >= MAX_COMPANIONS_PER_OWNER) {
             owner.sendSystemMessage(Component.literal(
-                    "§c[MineAgent] You already have " + MAX_COMPANIONS_PER_OWNER
-                            + " companions (the maximum). Remove one first."));
+                    CommandMessages.text("spawn.limit", MAX_COMPANIONS_PER_OWNER)));
             return null;
         }
         // No two companions may use the exact same model (same series different
@@ -532,16 +531,14 @@ public final class MineAgentEngine {
             CompanionState s = COMPANIONS.get(cid);
             if (s != null && model != null && model.equalsIgnoreCase(s.loop.getModel())) {
                 owner.sendSystemMessage(Component.literal(
-                        "§c[MineAgent] You already have a companion using model '"
-                                + model + "'. Each companion must use a different model."));
+                        CommandMessages.text("spawn.duplicate_model", model)));
                 return null;
             }
             // Names must also be unique (case-insensitive)
             if (s != null && name != null
                     && name.equalsIgnoreCase(s.companion.companionName())) {
                 owner.sendSystemMessage(Component.literal(
-                        "§c[MineAgent] A companion named '" + name
-                                + "' already exists. Choose a different name."));
+                        CommandMessages.text("spawn.duplicate_name", name)));
                 return null;
             }
         }
@@ -557,7 +554,7 @@ public final class MineAgentEngine {
             playerName = availableProfileName(owner, name);
         } catch (RuntimeException allocationError) {
             owner.sendSystemMessage(Component.literal(
-                    "§c[MineAgent] Cannot allocate a unique player identity."));
+                    CommandMessages.text("spawn.allocation")));
             System.err.println("[MineAgent] Profile allocation failed: " + allocationError);
             return null;
         }
@@ -579,7 +576,7 @@ public final class MineAgentEngine {
             // undo it or a later real player can be misclassified.
             COMPANION_PLAYER_UUIDS.remove(profile.getId());
             owner.sendSystemMessage(Component.literal(
-                    "§c[MineAgent] Failed to create companion: " + spawnError.getMessage()));
+                    CommandMessages.text("spawn.factory", String.valueOf(spawnError.getMessage()))));
             System.err.println("[MineAgent] Fake-player creation failed: " + spawnError);
             return null;
         }
@@ -735,8 +732,7 @@ public final class MineAgentEngine {
             }
             COMPANION_PLAYER_UUIDS.remove(profile.getId());
             owner.sendSystemMessage(Component.literal(
-                    "§c[MineAgent] Failed to initialize companion: "
-                            + initializationError.getMessage()));
+                    CommandMessages.text("spawn.initialization", String.valueOf(initializationError.getMessage()))));
             System.err.println("[MineAgent] Companion initialization failed: "
                     + initializationError);
             return null;
@@ -787,7 +783,7 @@ public final class MineAgentEngine {
                         ? CompanionGameMode.SURVIVAL : null);
         if (gameMode == null) {
             if (owner != null) owner.sendSystemMessage(Component.literal(
-                    "§c[MineAgent] Cannot spawn companion: invalid game mode."));
+                    CommandMessages.text("spawn.invalid_mode")));
             return null;
         }
 
@@ -805,8 +801,7 @@ public final class MineAgentEngine {
                 config.safety(), config.vision(), config.reflection());
         if (configDirPath != null && !config.save(configDirPath)) {
             owner.sendSystemMessage(Component.literal(
-                    "[MineAgent] Companion created, but the connection settings "
-                            + "could not be saved to disk."));
+                    CommandMessages.text("spawn.unsaved")));
         }
         return companion;
     }
@@ -1401,8 +1396,8 @@ public final class MineAgentEngine {
                                        CompanionState state, CompanionMode newMode) {
         setCompanionMode(state.companion.companionId(), newMode);
         String modeDesc = newMode == CompanionMode.FOLLOW
-                ? "§bFOLLOW §7(Stay close to you)"
-                : "§aFREE §7(Autonomous, can roam)";
+                ? CommandMessages.text("body.follow")
+                : CommandMessages.text("body.free");
         source.sendSuccess(() -> Component.literal(
                 "§6[MineAgent] " + state.companion.companionName() + " → " + modeDesc), false);
 
@@ -1420,10 +1415,10 @@ public final class MineAgentEngine {
             if (differentDimension || distance > 48.0) {
                 if (com.mineagent.engine.entity.SafeTeleport.beside(sp, owner)) {
                     source.sendSuccess(() -> Component.literal(
-                            "§b[MineAgent] Companion was far away — teleported near you!"), false);
+                            CommandMessages.text("body.far_teleported")), false);
                 } else {
                     source.sendFailure(Component.literal(
-                            "§c[MineAgent] No safe loaded position exists near you."));
+                            CommandMessages.text("body.no_safe_position")));
                 }
             }
         }
@@ -1763,7 +1758,7 @@ public final class MineAgentEngine {
 
                                         if (companion != null) {
                                             source.sendSuccess(() -> Component.literal(
-                                                    "§a[MineAgent] Companion '" + name + "' spawned!"),
+                                                    CommandMessages.text("spawn.success", name)),
                                                     false);
                                         }
                                         return 1;
@@ -1785,7 +1780,7 @@ public final class MineAgentEngine {
 
                                             if (companion != null) {
                                                 source.sendSuccess(() -> Component.literal(
-                                                        "§a[MineAgent] Companion '" + name + "' spawned!"),
+                                                        CommandMessages.text("spawn.success", name)),
                                                         false);
                                             }
                                             return 1;
@@ -1804,10 +1799,10 @@ public final class MineAgentEngine {
                         boolean removed = removeCompanionByOwner(owner.getUUID());
                         if (removed) {
                             source.sendSuccess(() -> Component.literal(
-                                    "§a[MineAgent] Companion removed."), false);
+                                    CommandMessages.text("body.removed")), false);
                         } else {
                             source.sendFailure(Component.literal(
-                                    "§c[MineAgent] You don't have a companion."));
+                                    CommandMessages.text("body.missing")));
                         }
                         return removed ? 1 : 0;
                     })
@@ -1820,25 +1815,24 @@ public final class MineAgentEngine {
                         Optional<CompanionState> stateOpt = getCompanionByOwner(owner.getUUID());
                         if (stateOpt.isEmpty()) {
                             source.sendFailure(Component.literal(
-                                    "§c[MineAgent] You don't have a companion."));
+                                    CommandMessages.text("body.missing")));
                             return 0;
                         }
                         CompanionState state = stateOpt.get();
                         if (!state.lifecycle.isDead()) {
                             source.sendFailure(Component.literal(
-                                    "§c[MineAgent] Your companion is not dead."));
+                                    CommandMessages.text("body.not_dead")));
                             return 0;
                         }
                         if (state.companion.hardcoreDeathLocked()
                                 || state.companion.gameMode().isHardcore()) {
                             source.sendFailure(Component.literal(
-                                    "§c[MineAgent] This companion died in Hardcore mode and "
-                                            + "cannot respawn. Create a new companion instead."));
+                                    CommandMessages.text("body.hardcore")));
                             return 0;
                         }
                         state.lifecycle.onRespawn(state.companion);
                         source.sendSuccess(() -> Component.literal(
-                                "§a[MineAgent] Companion respawned!"), false);
+                                CommandMessages.text("body.respawned")), false);
                         return 1;
                     })
                 )
@@ -1848,15 +1842,15 @@ public final class MineAgentEngine {
                         var source = ctx.getSource();
                         if (COMPANIONS.isEmpty()) {
                             source.sendSuccess(() -> Component.literal(
-                                    "§7[MineAgent] No active companions."), false);
+                                    CommandMessages.text("list.empty")), false);
                             return 0;
                         }
-                        StringBuilder sb = new StringBuilder("§7[MineAgent] Active companions:\n");
+                        StringBuilder sb = new StringBuilder(CommandMessages.text("list.heading"));
                         for (CompanionState state : COMPANIONS.values()) {
                             sb.append("§7  - ").append(state.companion.companionName());
-                            sb.append(" (owner: ").append(state.companion.ownerName()).append(")");
-                            sb.append(state.lifecycle.isDead() ? " §c[DEAD]" : "");
-                            sb.append(state.lifecycle.isPaused() ? " §e[PAUSED]" : "");
+                            sb.append(CommandMessages.text("list.owner", String.valueOf(state.companion.ownerName())));
+                            sb.append(state.lifecycle.isDead() ? CommandMessages.text("list.dead") : "");
+                            sb.append(state.lifecycle.isPaused() ? CommandMessages.text("list.paused") : "");
                             sb.append("\n");
                         }
                         source.sendSuccess(() -> Component.literal(sb.toString()), false);
@@ -1868,13 +1862,13 @@ public final class MineAgentEngine {
                     .executes(ctx -> {
                         var source = ctx.getSource();
                         var providers = LLMProviderRegistry.all();
-                        StringBuilder sb = new StringBuilder("§6[MineAgent] Available LLM Providers:\n");
+                        StringBuilder sb = new StringBuilder(CommandMessages.text("providers.heading"));
                         for (var p : providers) {
                             sb.append("§e  - ").append(p.providerId())
                               .append("§7 (").append(p.displayName()).append(")§r\n");
                         }
-                        sb.append("\n§7Use §e/mineagent models [provider]§7 to see example model IDs.");
-                        sb.append("\n§7Compatible adapters also accept model IDs not listed here.");
+                        sb.append(CommandMessages.text("providers.models_hint"));
+                        sb.append(CommandMessages.text("providers.extra_hint"));
                         source.sendSuccess(() -> Component.literal(sb.toString()), false);
                         return providers.size();
                     })
@@ -1885,7 +1879,7 @@ public final class MineAgentEngine {
                         // No argument → show all providers and their models
                         var source = ctx.getSource();
                         var providers = LLMProviderRegistry.all();
-                        StringBuilder sb = new StringBuilder("§6[MineAgent] Example Models:\n");
+                        StringBuilder sb = new StringBuilder(CommandMessages.text("models.heading"));
                         for (var p : providers) {
                             sb.append("\n§e").append(p.providerId())
                               .append("§7 (").append(p.displayName()).append("):§r\n");
@@ -1914,14 +1908,13 @@ public final class MineAgentEngine {
                             }
                             var p = providerOpt.get();
                             StringBuilder sb = new StringBuilder();
-                            sb.append("§6[MineAgent] Example models for §e")
-                                    .append(p.displayName()).append("§r:\n");
+                            sb.append(CommandMessages.text("models.provider_heading", String.valueOf(p.displayName())));
                             var models = p.defaultModels();
                             for (int i = 0; i < models.size(); i++) {
                                 sb.append("  §7").append(models.get(i));
                                 if (i < models.size() - 1) sb.append("\n");
                             }
-                            sb.append("\n§7Any model ID accepted by this endpoint may be entered directly.");
+                            sb.append(CommandMessages.text("models.endpoint_hint"));
                             source.sendSuccess(() -> Component.literal(sb.toString()), false);
                             return 1;
                         })
@@ -1932,20 +1925,20 @@ public final class MineAgentEngine {
                     .executes(ctx -> {
                         var source = ctx.getSource();
                         StringBuilder sb = new StringBuilder();
-                        sb.append("§6[MineAgent] Current Configuration:\n");
+                        sb.append(CommandMessages.text("config.heading"));
                         sb.append("§eLLM:\n");
-                        sb.append("  §7Provider: §f").append(config.llm().provider()).append("\n");
-                        sb.append("  §7Model: §f").append(config.llm().model()).append("\n");
-                        sb.append("  §7API Key: §f").append(config.llm().apiKey().isEmpty()
-                                ? "§c(not set)" : "****(hidden)").append("\n");
-                        sb.append("  §7Base URL: §f").append(config.llm().baseUrl().isEmpty()
-                                ? "(default)" : config.llm().baseUrl()).append("\n");
-                        sb.append("  §7Temperature: §f").append(config.llm().temperature()).append("\n");
-                        sb.append("  §7Max Tokens: §f").append(config.llm().maxTokens()).append("\n");
-                        sb.append("§eCompanion:\n");
-                        sb.append("  §7Name: §f").append(config.companion().name()).append("\n");
-                        sb.append("  §7Game Mode: §f").append(config.companion().gameMode()).append("\n");
-                        sb.append("§7Config file: config/mineagent.json");
+                        sb.append(CommandMessages.text("config.provider")).append(config.llm().provider()).append("\n");
+                        sb.append(CommandMessages.text("config.model")).append(config.llm().model()).append("\n");
+                        sb.append(CommandMessages.text("config.key")).append(config.llm().apiKey().isEmpty()
+                                ? CommandMessages.text("config.unset") : CommandMessages.text("config.masked")).append("\n");
+                        sb.append(CommandMessages.text("config.url")).append(config.llm().baseUrl().isEmpty()
+                                ? CommandMessages.text("config.default") : config.llm().baseUrl()).append("\n");
+                        sb.append(CommandMessages.text("config.temperature")).append(config.llm().temperature()).append("\n");
+                        sb.append(CommandMessages.text("config.tokens")).append(config.llm().maxTokens()).append("\n");
+                        sb.append(CommandMessages.text("config.companion"));
+                        sb.append(CommandMessages.text("config.name")).append(config.companion().name()).append("\n");
+                        sb.append(CommandMessages.text("config.mode")).append(config.companion().gameMode()).append("\n");
+                        sb.append(CommandMessages.text("config.file"));
                         source.sendSuccess(() -> Component.literal(sb.toString()), false);
                         return 1;
                     })
@@ -1959,7 +1952,7 @@ public final class MineAgentEngine {
                         Optional<CompanionState> stateOpt = getCompanionByOwner(owner.getUUID());
                         if (stateOpt.isEmpty()) {
                             source.sendFailure(Component.literal(
-                                    "§c[MineAgent] You don't have a companion!"));
+                                    CommandMessages.text("body.missing_emphatic")));
                             return 0;
                         }
                         CompanionMode newMode = toggleCompanionMode(stateOpt.get().companion.companionId());
@@ -1977,7 +1970,7 @@ public final class MineAgentEngine {
                                 Optional<CompanionState> stateOpt = getCompanionByOwner(owner.getUUID());
                                 if (stateOpt.isEmpty()) {
                                     source.sendFailure(Component.literal(
-                                            "§c[MineAgent] You don't have a companion!"));
+                                            CommandMessages.text("body.missing_emphatic")));
                                     return 0;
                                 }
                                 CompanionMode newMode = arg1.equalsIgnoreCase("follow")
@@ -1988,7 +1981,7 @@ public final class MineAgentEngine {
                                 Optional<CompanionState> stateOpt = getCompanionByName(owner.getUUID(), arg1);
                                 if (stateOpt.isEmpty()) {
                                     source.sendFailure(Component.literal(
-                                            "§c[MineAgent] No companion named '" + arg1 + "' found."));
+                                            CommandMessages.text("body.named_missing", arg1)));
                                     return 0;
                                 }
                                 CompanionMode newMode = toggleCompanionMode(stateOpt.get().companion.companionId());
@@ -2006,7 +1999,7 @@ public final class MineAgentEngine {
                                 Optional<CompanionState> stateOpt = getCompanionByName(owner.getUUID(), name);
                                 if (stateOpt.isEmpty()) {
                                     source.sendFailure(Component.literal(
-                                            "§c[MineAgent] No companion named '" + name + "' found."));
+                                            CommandMessages.text("body.named_missing", name)));
                                     return 0;
                                 }
                                 CompanionMode newMode;
@@ -2016,7 +2009,7 @@ public final class MineAgentEngine {
                                     newMode = CompanionMode.FREE;
                                 } else {
                                     source.sendFailure(Component.literal(
-                                            "§c[MineAgent] Invalid mode '" + modeArg + "'. Use follow or free."));
+                                            CommandMessages.text("body.invalid_mode", modeArg)));
                                     return 0;
                                 }
                                 return applyModeChange(source, owner, stateOpt.get(), newMode);
@@ -2033,7 +2026,7 @@ public final class MineAgentEngine {
                         Optional<CompanionState> stateOpt = getCompanionByOwner(owner.getUUID());
                         if (stateOpt.isEmpty()) {
                             source.sendFailure(Component.literal(
-                                    "§c[MineAgent] You don't have a companion!"));
+                                    CommandMessages.text("body.missing_emphatic")));
                             return 0;
                         }
 
@@ -2047,13 +2040,8 @@ public final class MineAgentEngine {
                         CompanionMode mode = getCompanionMode(stateOpt.get().companion.companionId());
 
                         source.sendSuccess(() -> Component.literal(
-                                "§6[MineAgent] Companion Location:\n"
-                                + "§7  Name: §f" + stateOpt.get().companion.companionName() + "\n"
-                                + "§7  Position: §f" + x + ", " + y + ", " + z + "\n"
-                                + "§7  Dimension: §f" + dim + "\n"
-                                + "§7  Health: §c" + health + "/20\n"
-                                + "§7  Food: §e" + food + "/20\n"
-                                + "§7  Mode: §f" + mode), false);
+                                CommandMessages.text("body.location", String.valueOf(stateOpt.get().companion.companionName()),
+                                        x, y, z, String.valueOf(dim), health, food, String.valueOf(mode))), false);
                         return 1;
                     })
                 )
@@ -2066,7 +2054,7 @@ public final class MineAgentEngine {
                         Optional<CompanionState> stateOpt = getCompanionByOwner(owner.getUUID());
                         if (stateOpt.isEmpty()) {
                             source.sendFailure(Component.literal(
-                                    "§c[MineAgent] You don't have a companion!"));
+                                    CommandMessages.text("body.missing_emphatic")));
                             return 0;
                         }
 
@@ -2074,7 +2062,7 @@ public final class MineAgentEngine {
                         owner.teleportTo(sp.serverLevel(), sp.getX(), sp.getY(), sp.getZ(),
                                 sp.getYRot(), sp.getXRot());
                         source.sendSuccess(() -> Component.literal(
-                                "§a[MineAgent] Teleported to your companion!"), false);
+                                CommandMessages.text("body.teleported")), false);
                         return 1;
                     })
                 )
@@ -2088,10 +2076,10 @@ public final class MineAgentEngine {
                         // guaranteed to be the Minecraft game directory.
                         if (configDirPath != null) applyConfiguration(MineAgentConfig.load(configDirPath));
                         source.sendSuccess(() -> Component.literal(
-                                "§a[MineAgent] Configuration reloaded!"), false);
+                                CommandMessages.text("config.reloaded")), false);
                         source.sendSuccess(() -> Component.literal(
-                                "§7Provider: " + config.llm().provider()
-                                        + " | Model: " + config.llm().model()), false);
+                                CommandMessages.text("connection.summary", String.valueOf(config.llm().provider()),
+                                        String.valueOf(config.llm().model()))), false);
                         return 1;
                     })
                 )
@@ -2106,7 +2094,7 @@ public final class MineAgentEngine {
                             Optional<CompanionState> stateOpt = getCompanionByOwner(owner.getUUID());
                             if (stateOpt.isEmpty()) {
                                 source.sendFailure(Component.literal(
-                                        "§c[MineAgent] You don't have a companion!"));
+                                        CommandMessages.text("body.missing_emphatic")));
                                 return 0;
                             }
 
@@ -2126,18 +2114,18 @@ public final class MineAgentEngine {
                                         .refreshPlayerInfo(companionPlayer);
                                 persistCompanion(state);
                                 source.sendSuccess(() -> Component.literal(
-                                        "§a[MineAgent] Skin reset to default (" + skinName + ")!"), false);
+                                        CommandMessages.text("skin.reset_named", skinName)), false);
                                 return 1;
                             }
 
                             if (!skinName.matches("[A-Za-z0-9_]{1,16}")) {
                                 source.sendFailure(Component.literal(
-                                        "§c[MineAgent] Skin name must be a valid Minecraft username."));
+                                        CommandMessages.text("skin.invalid")));
                                 return 0;
                             }
 
                             source.sendSuccess(() -> Component.literal(
-                                    "§7[MineAgent] Loading skin from player '" + skinName + "'..."), false);
+                                    CommandMessages.text("skin.loading", skinName)), false);
 
                             // Load skin asynchronously
                             com.mineagent.engine.entity.fakeplayer.SkinLoader.loadSkinAsync(skinName, skinOpt -> {
@@ -2148,8 +2136,7 @@ public final class MineAgentEngine {
                                             .filter(current -> current == state).isEmpty()) return;
                                     if (skinOpt.isEmpty()) {
                                         owner.sendSystemMessage(Component.literal(
-                                                "§c[MineAgent] Player '" + skinName
-                                                        + "' not found or has no skin."));
+                                                CommandMessages.text("skin.not_found", skinName)));
                                         return;
                                     }
 
@@ -2165,7 +2152,7 @@ public final class MineAgentEngine {
                                             .refreshPlayerInfo(companionPlayer);
 
                                     owner.sendSystemMessage(Component.literal(
-                                            "§a[MineAgent] Skin applied from player '" + skinName + "'!"));
+                                            CommandMessages.text("skin.applied", skinName)));
 
                                     // Persist this exact companion. Looking up
                                     // the owner's primary can update a sibling
@@ -2186,7 +2173,7 @@ public final class MineAgentEngine {
                         Optional<CompanionState> stateOpt = getCompanionByOwner(owner.getUUID());
                         if (stateOpt.isEmpty()) {
                             source.sendFailure(Component.literal(
-                                    "§c[MineAgent] You don't have a companion!"));
+                                    CommandMessages.text("body.missing_emphatic")));
                             return 0;
                         }
 
@@ -2205,7 +2192,7 @@ public final class MineAgentEngine {
                         persistCompanion(state);
 
                         source.sendSuccess(() -> Component.literal(
-                                "§a[MineAgent] Skin reset to default Steve/Alex!"), false);
+                                CommandMessages.text("skin.reset")), false);
                         return 1;
                     })
                 )
@@ -2239,7 +2226,7 @@ public final class MineAgentEngine {
                                             double t = Double.parseDouble(value);
                                             if (!Double.isFinite(t) || t < 0.0 || t > 2.0) {
                                                 source.sendFailure(Component.literal(
-                                                        "§c[MineAgent] Temperature must be from 0 to 2."));
+                                                        CommandMessages.text("config.range")));
                                                 return 0;
                                             }
                                             llm = new MineAgentConfig.LLMConfig(
@@ -2254,15 +2241,15 @@ public final class MineAgentEngine {
                                                 comp.instantBreak(), comp.creativeReach());
                                         default -> {
                                             source.sendFailure(Component.literal(
-                                                    "§c[MineAgent] Unknown key: " + key));
+                                                    CommandMessages.text("config.unknown", key)));
                                             source.sendFailure(Component.literal(
-                                                    "§7Valid: provider, model, apikey, baseurl, temperature, name, skin"));
+                                                    CommandMessages.text("config.valid")));
                                             return 0;
                                         }
                                     }
                                 } catch (NumberFormatException e) {
                                     source.sendFailure(Component.literal(
-                                            "§c[MineAgent] Invalid number for " + key + ": " + value));
+                                            CommandMessages.text("config.invalid_number", key, value)));
                                     return 0;
                                 }
 
@@ -2275,10 +2262,9 @@ public final class MineAgentEngine {
                                 // values remain visible so configuration mistakes are
                                 // diagnosable without exposing authentication secrets.
                                 String displayedValue = key.equals("apikey") || key.equals("api_key")
-                                        ? "(hidden)" : value;
+                                        ? CommandMessages.text("config.hidden") : value;
                                 source.sendSuccess(() -> Component.literal(
-                                        "§a[MineAgent] Config updated: §f" + key
-                                                + "§a = §f" + displayedValue), false);
+                                        CommandMessages.text("config.updated", key, displayedValue)), false);
                                 return 1;
                             })
                         )
@@ -2295,7 +2281,7 @@ public final class MineAgentEngine {
                             Optional<CompanionState> stateOpt = getCompanionByOwner(owner.getUUID());
                             if (stateOpt.isEmpty()) {
                                 source.sendFailure(Component.literal(
-                                        "§c[MineAgent] You don't have a companion!"));
+                                        CommandMessages.text("body.missing_emphatic")));
                                 return 0;
                             }
 
@@ -2310,12 +2296,12 @@ public final class MineAgentEngine {
                             boolean ok = renameCompanion(sp.getUUID(), newName);
                             if (!ok) {
                                 source.sendFailure(Component.literal(
-                                        "§c[MineAgent] Failed to rename companion."));
+                                        CommandMessages.text("body.rename_failed")));
                                 return 0;
                             }
 
                             source.sendSuccess(() -> Component.literal(
-                                    "§a[MineAgent] Companion renamed to '" + newName + "'!"), false);
+                                    CommandMessages.text("body.renamed", newName)), false);
                             return 1;
                         })
                     )
@@ -2344,7 +2330,7 @@ public final class MineAgentEngine {
                                 effort = ThinkingEffortSpec.normalize(requestedEffort);
                             } catch (IllegalArgumentException invalidEffort) {
                                 source.sendFailure(Component.literal(
-                                        "§c[MineAgent] " + invalidEffort.getMessage()));
+                                        "§c[MineAgent] " + CommandMessages.validation(invalidEffort)));
                                 return 0;
                             }
 
@@ -2353,7 +2339,7 @@ public final class MineAgentEngine {
                                     : getCompanionByOwner(owner.getUUID());
 
                             if (stateOpt.isEmpty()) {
-                                source.sendFailure(Component.literal("§c[MineAgent] Companion not found!"));
+                                source.sendFailure(Component.literal(CommandMessages.text("effort.missing")));
                                 return 0;
                             }
 
@@ -2361,8 +2347,7 @@ public final class MineAgentEngine {
                             state.loop.setReasoningEffort(effort);
                             persistCompanion(state);
                             source.sendSuccess(() -> Component.literal(
-                                    "§a[MineAgent] Companion '" + state.companion.companionName()
-                                            + "' thinking effort set to " + effort), false);
+                                    CommandMessages.text("effort.success", String.valueOf(state.companion.companionName()), effort)), false);
                             return 1;
                         })
                     )
@@ -2390,7 +2375,7 @@ public final class MineAgentEngine {
         try {
             normalizedEffort = ThinkingEffortSpec.normalize(reasoningEffort);
         } catch (IllegalArgumentException invalidEffort) {
-            source.sendFailure(Component.literal("§c[MineAgent] " + invalidEffort.getMessage()));
+            source.sendFailure(Component.literal("§c[MineAgent] " + CommandMessages.validation(invalidEffort)));
             return 0;
         }
         CompanionEntity companion = spawnCompanion(
@@ -2402,9 +2387,9 @@ public final class MineAgentEngine {
 
         String spawnedName = name;
         source.sendSuccess(() -> Component.literal(
-                "§a[MineAgent] Companion '" + spawnedName + "' spawned!"), false);
+                CommandMessages.text("spawn.success", spawnedName)), false);
         source.sendSuccess(() -> Component.literal(
-                "§7Provider: " + cfgProvider + " | Model: " + cfgModel), false);
+                CommandMessages.text("connection.summary", String.valueOf(cfgProvider), String.valueOf(cfgModel))), false);
         return 1;
     }
 
@@ -2442,38 +2427,38 @@ public final class MineAgentEngine {
                                                  String model, String baseUrl,
                                                  double temperature,
                                                  String reasoningEffort) {
-        if (owner == null || owner.getServer() == null) return "owner is not connected";
-        if (!isValidDisplayName(name)) return "name must be 1-64 printable characters";
+        if (owner == null || owner.getServer() == null) return CommandMessages.text("validation.owner");
+        if (!isValidDisplayName(name)) return CommandMessages.text("validation.name");
         if (providerId == null || providerId.isBlank()
                 || providerId.length() > 64
                 || LLMProviderRegistry.get(providerId).isEmpty()) {
-            return "unknown LLM provider '" + providerId + "'";
+            return CommandMessages.text("validation.provider", String.valueOf(providerId));
         }
         var provider = LLMProviderRegistry.get(providerId).orElse(null);
         if (apiKey != null && apiKey.length() > 16384) {
-            return "API key is too long";
+            return CommandMessages.text("validation.key_long");
         }
         if (provider != null && provider.requiresApiKey()
                 && (apiKey == null || apiKey.isBlank())) {
-            return "API key is missing";
+            return CommandMessages.text("validation.key_missing");
         }
         if (model == null || model.isBlank() || model.length() > 256) {
-            return "model must be 1-256 characters";
+            return CommandMessages.text("validation.model");
         }
         if (!Double.isFinite(temperature) || temperature < 0.0 || temperature > 2.0) {
-            return "temperature must be a finite number from 0 to 2";
+            return CommandMessages.text("validation.temperature");
         }
-        if (baseUrl != null && baseUrl.length() > 2048) return "base URL is too long";
+        if (baseUrl != null && baseUrl.length() > 2048) return CommandMessages.text("validation.url_long");
         try {
             OpenAICompatibleProvider.validateBaseUrl(baseUrl == null || baseUrl.isBlank()
                     ? provider.defaultBaseUrl() : baseUrl);
         } catch (IllegalArgumentException invalidUrl) {
-            return invalidUrl.getMessage();
+            return CommandMessages.validation(invalidUrl);
         }
         try {
             ThinkingEffortSpec.normalize(reasoningEffort);
         } catch (IllegalArgumentException invalidEffort) {
-            return invalidEffort.getMessage();
+            return CommandMessages.validation(invalidEffort);
         }
         return null;
     }
@@ -2581,64 +2566,7 @@ public final class MineAgentEngine {
     }
 
     private static void printHelp(CommandSourceStack source) {
-        String help = """
-            §6═══════ MineAgent Commands ═══════§r
-
-            §e/mineagent quick§7 [name]
-              §aQuick spawn using config file (recommended)
-
-            §e/mineagent spawn§7 <name> <provider> <model> <apikey> [temp]
-              §aFull spawn with all parameters
-
-            §e/mineagent remove
-              §aRemove your companion
-
-            §e/mineagent respawn
-              §aRespawn a dead companion
-
-            §e/mineagent list
-              §aList all active companions
-
-            §e/mineagent providers
-              §aList all LLM providers
-
-            §e/mineagent models§7 [provider]
-              §aList available models
-
-            §e/mineagent config
-              §aShow current configuration
-
-            §e/mineagent reload
-              §aReload config from file
-
-            §e/mineagent mode§7 [follow|free|<name> [follow|free]]
-              §aToggle or set FOLLOW/FREE mode for primary or named companion
-
-            §e/mineagent locate
-              §aGet companion's exact position, health, food, and mode
-
-            §e/mineagent tp
-              §aTeleport to your companion's location
-
-            §e/mineagent setskin§7 <playername|default|steve|alex>
-              §aSet companion skin from a player name, or reset to default
-
-            §e/mineagent resetskin
-              §aReset companion skin to default Steve/Alex
-
-            §e/mineagent rename§7 <newname>
-              §aRename your companion (no name tag needed)
-
-            §e/mineagent seteffort§7 [name] <auto>
-              §aUse server-managed reasoning and chat-template defaults
-
-            §e/mineagent setconfig§7 <key> <value>
-              §aUpdate config and save to file. Keys:
-              §7  provider, model, apikey, baseurl, temperature, name, skin
-
-            §7───────────────────────────────
-            §7Quick start: Edit §fconfig/mineagent.json§7, then run §e/mineagent quick§7
-            §7───────────────────────────────§r""";
+        String help = CommandMessages.text("help");
         source.sendSuccess(() -> Component.literal(help), false);
     }
 

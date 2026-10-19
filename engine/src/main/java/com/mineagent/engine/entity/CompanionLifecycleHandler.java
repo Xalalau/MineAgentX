@@ -4,6 +4,7 @@ import com.mineagent.api.entity.AgentPlayer;
 import com.mineagent.api.entity.CompanionLifecycle;
 import com.mineagent.api.task.*;
 import com.mineagent.engine.MineAgentEngine;
+import com.mineagent.engine.i18n.CommandMessages;
 import com.mineagent.engine.entity.CompanionEntity;
 import com.mineagent.engine.loop.AgentLoop;
 import com.mineagent.engine.cognition.TeamBlackboard;
@@ -85,7 +86,7 @@ public class CompanionLifecycleHandler implements CompanionLifecycle {
         loop.wake("companion_spawned");
 
         // Notify the owner
-        notifyOwner("§a[MineAgent] " + companion.companionName() + " has spawned!");
+        notifyOwner(CommandMessages.text("lifecycle.spawn", String.valueOf(companion.companionName())));
 
         System.out.println("[MineAgent] Companion '" + companion.companionName()
                 + "' spawned (owner: " + companion.ownerName() + ")");
@@ -138,14 +139,12 @@ public class CompanionLifecycleHandler implements CompanionLifecycle {
         // brain and owner the truth instead of advertising a respawn command
         // that the authoritative engine will reject.
         loop.onBodyLog(hardcore
-                ? "I died in hardcore mode. This death is permanent; this companion cannot respawn or change mode. My human owner must create a new companion."
-                : "I died! My health reached zero. I need to be respawned.");
+                ? CommandMessages.text("lifecycle.hardcore_body")
+                : CommandMessages.text("lifecycle.death_body"));
 
         notifyOwner(hardcore
-                ? "§c[MineAgent] " + companion.companionName()
-                        + " died permanently in Hardcore mode. Create a new companion."
-                : "§c[MineAgent] " + companion.companionName() + " has died! "
-                        + "Use /mineagent respawn to bring them back.");
+                ? CommandMessages.text("lifecycle.hardcore_death", String.valueOf(companion.companionName()))
+                : CommandMessages.text("lifecycle.death", String.valueOf(companion.companionName())));
 
         System.out.println("[MineAgent] Companion '" + companion.companionName() + "' died");
     }
@@ -161,8 +160,7 @@ public class CompanionLifecycleHandler implements CompanionLifecycle {
         if (this.companion != companion) return;
         if (companion instanceof CompanionEntity entity
                 && (entity.gameMode().isHardcore() || entity.hardcoreDeathLocked())) {
-            notifyOwner("§c[MineAgent] A companion that dies in Hardcore mode "
-                    + "cannot respawn or change mode. Create a new companion.");
+            notifyOwner(CommandMessages.text("lifecycle.hardcore_refused"));
             return;
         }
 
@@ -214,11 +212,11 @@ public class CompanionLifecycleHandler implements CompanionLifecycle {
         }
 
         // Resume the agent loop — inform the LLM of the respawn
-        loop.onBodyLog("I've been respawned! I'm at full health and ready to continue.");
+        loop.onBodyLog(CommandMessages.text("lifecycle.respawn_body"));
         loop.resume("companion_respawned");
 
         // Notify the owner
-        notifyOwner("§a[MineAgent] " + companion.companionName() + " has respawned!");
+        notifyOwner(CommandMessages.text("lifecycle.respawn", String.valueOf(companion.companionName())));
 
         System.out.println("[MineAgent] Companion '" + companion.companionName() + "' respawned");
     }
@@ -248,7 +246,7 @@ public class CompanionLifecycleHandler implements CompanionLifecycle {
         paused = true;
 
         // Notify the owner
-        notifyOwner("§7[MineAgent] " + companion.companionName() + " has been removed.");
+        notifyOwner(CommandMessages.text("lifecycle.removed", String.valueOf(companion.companionName())));
 
         System.out.println("[MineAgent] Companion '" + companion.companionName()
                 + "' despawned and cleaned up");

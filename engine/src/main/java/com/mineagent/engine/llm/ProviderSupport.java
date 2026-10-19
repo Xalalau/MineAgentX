@@ -1,5 +1,6 @@
 package com.mineagent.engine.llm;
 
+import com.mineagent.api.i18n.LocalizedValidationException;
 import com.mineagent.api.llm.ChatMessage;
 import com.mineagent.api.llm.provider.LLMProviderException;
 import com.google.gson.JsonArray;
@@ -57,20 +58,20 @@ final class ProviderSupport {
         String base = configured == null || configured.isBlank()
                 ? fallback : configured.trim();
         if (base == null || base.isBlank()) {
-            throw new IllegalArgumentException(provider + " base URL is not configured");
+            throw new LocalizedValidationException("validation.url_missing", provider + " base URL is not configured", null, provider);
         }
         URI uri;
         try {
             uri = URI.create(base);
         } catch (IllegalArgumentException malformed) {
-            throw new IllegalArgumentException(provider + " base URL is malformed", malformed);
+            throw new LocalizedValidationException("validation.url_malformed", provider + " base URL is malformed", malformed, provider);
         }
         String scheme = uri.getScheme();
         if (!("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))
                 || uri.getHost() == null || uri.getUserInfo() != null || uri.getQuery() != null
                 || uri.getFragment() != null) {
-            throw new IllegalArgumentException(provider
-                    + " base URL must be an absolute HTTP(S) URL without query or fragment");
+            throw new LocalizedValidationException("validation.url_shape", provider
+                    + " base URL must be an absolute HTTP(S) URL without query or fragment", null, provider);
         }
         // Only loopback, private LAN, link-local, and IPv6 unique-local hosts
         // are allowed. Check every DNS answer rather than accepting a public
@@ -82,12 +83,12 @@ final class ProviderSupport {
                 if (address.isAnyLocalAddress() || address.isMulticastAddress()
                         || !(address.isLoopbackAddress() || address.isSiteLocalAddress()
                         || address.isLinkLocalAddress() || uniqueLocal)) {
-                    throw new IllegalArgumentException(provider
-                            + " requires a loopback or private LAN server; public endpoints are disabled");
+                    throw new LocalizedValidationException("validation.url_public", provider
+                            + " requires a loopback or private LAN server; public endpoints are disabled", null, provider);
                 }
             }
         } catch (java.net.UnknownHostException unresolved) {
-            throw new IllegalArgumentException(provider + " local server hostname cannot be resolved", unresolved);
+            throw new LocalizedValidationException("validation.url_unresolved", provider + " local server hostname cannot be resolved", unresolved, provider);
         }
         // Callers append a fixed API suffix; trimming avoids a double slash
         // that strict reverse proxies may reject.
